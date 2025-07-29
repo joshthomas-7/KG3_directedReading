@@ -1,32 +1,21 @@
-%%% Joshua Thomas
-%%% C3376353
+function [T08,Ts,Rs,As] = KG3_FKM()
 
-clear
-clc
+%% Setting up the direct kinematics 
 
 syms q [7 1]
 
-function y = c(x)
-    y = cos(x);
-end
-
-function y = s(x)
-    y = sin(x);
-end
-
-
-%% Creating the generic rotation matrix for each q
+% Creating the generic rotation matrix for each q
 n = length(q);
 Rs = {};
 for i = 1:n
-    R = [c(q(i)), -s(q(i)), 0, 0;
-         s(q(i)),  c(q(i)), 0, 0;
+    R = [cos(q(i)), -sin(q(i)), 0, 0;
+         sin(q(i)),  cos(q(i)), 0, 0;
          0,        0,       1, 0;
          0,        0,       0, 1];
     Rs{i} = R;
 end
 
-%% Creating the coordinate transformations
+% Creating the coordinate transformations
 Ts = {};
 
 T01 = [1 0 0 0;
@@ -36,14 +25,14 @@ T01 = [1 0 0 0;
 Ts{1} = T01;
 
 T12 = [1 0 0 0;
-       0 0 -1 0.054;
+       0 0 -1 0.0054;
        0 1 0 -0.1284;
        0 0 0 1];
 Ts{2} = T12;
 
 T23 = [1 0 0 0;
     0 0 1 -0.2104;
-    0 -1 0 -0.0640;
+    0 -1 0 -0.00640;
     0 0 0 1];
 Ts{3} = T23;
 
@@ -72,16 +61,20 @@ T67 = [1 0 0 0;
 Ts{7} = T67;
 
 T78 = [1 0 0 0;
-    0 -1 0 0;
-    0 0 -1 -0.0615];
+       0 -1 0 0;
+       0 0 -1 -0.0615;
+       0 0 0 1];
 
-%% Computing the transformation matrices
+% Computing the transformation matrices
 T07 = eye(4);
+As = {};
 for j = 1:n
     A = vpa(Ts{j} * Rs{j}, 4);
+    As{j} = A;
     T07 = T07*A;
-    disp(['A' num2str(j-1) num2str(j) ' = ']);
-    disp(A);
+    % disp(['A' num2str(j-1) num2str(j) ' = ']);
+    % disp(A);
 end
 
-T07 = simplify(T07, 'Steps', 15)
+T08 = simplify(T07*T78, 'Steps', 15);
+end
