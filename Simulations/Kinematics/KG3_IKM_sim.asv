@@ -1,0 +1,23 @@
+%%% Joshua Thomas
+%%% C3376353
+
+clear
+close all
+clc
+
+%% Setting up the KG3 direct kinematic model
+[transform_computed, Ts, Rs, As] = KG3_FKM;
+
+% Extracting the position vector
+f = transform_computed(1:end-1,end);
+W = eye(7); % joint weighting matrix
+H = [W zeros(7);
+     zeros(7) zeros(7)];
+f = []
+
+
+%% Setting up the robot model
+% Load the KG3 robot 
+gen3 = loadrobot("kinovaGen3", "DataFormat", "column");
+% show(gen3);
+showdetails(gen3)

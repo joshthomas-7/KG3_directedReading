@@ -24,7 +24,7 @@ showdetails(gen3)
 q_config = randomConfiguration(gen3);
 show(gen3, q_config)
 % 
-% % Find the homogenous transform of link 7 relative to the base
+%% Find the homogenous transform
 transform = getTransform(gen3, q_config, "EndEffector_Link")
 
 q1 = q_config(1);
@@ -35,4 +35,5 @@ q5 = q_config(5);
 q6 = q_config(6);
 q7 = q_config(7);
 
+% Using the joint positions to compute the expected transform
 transform_computed = vpa(subs(transform_computed),4)
