@@ -13,6 +13,21 @@ rho = 0.1;
 
 % Extracting the position vector
 r08 = transform_computed(1:end-1,end);
+% Extracting the rotation matrix
+R = transform_computed(1:3,1:3);
+% % Computing the euler angles
+% theta = -asin(R(3,1)); % theta (pitch)
+% phi = atan2(R(3,2)/cos(theta), R(3,3)/cos(theta)); % phi (roll)
+% psi = atan2(R(2,1)/cos(theta), R(1,1)/cos(theta)); % psi (yaw)
+% eul = [theta;phi;psi];
+% pose = [r08;eul];
+
+% Computing the unit quaternion
+% quat = rotm2quat(R);
+eta = 0.5*sqrt(R(1,1) + R(2,2) + R(3,3) + 1);
+eps = 0.5*[sign(R(3,2)-R(2,3))*sqrt(R(1,1) - R(2,2) - R(3,3) + 1);
+           sign()];
+
 
 %% Setting up the robot model
 % Load the KG3 robot 
@@ -26,13 +41,20 @@ q_config = randomConfiguration(gen3);
 
 %% Find the homogenous transform
 transform = getTransform(gen3, q_config, "EndEffector_Link");
-r08_desired = transform(1:end-1,end);
+
+% Extracting the position vector
+r08_desired = transform(1:end-1,end)
+
+% Extracting the rotation matrix 
+R_desired = transform(1:3,1:3);
+% eul_desired = rotm2eul(R_desired)
+quat_desired = rotm2quat(R_desired);
 
 %% Constructing the IKM optimisation problem
-% Converting the symbolic expression for the pos
+% Converting the symbolic expression for the position vector to a function
 k = matlabFunction(r08);
 
-% Define the objective function
+% Defining the objective function 
 function f = objfun(qtilde)
     Ndof = 7;
     W = eye(Ndof); % joint weighting matrix
@@ -40,33 +62,31 @@ function f = objfun(qtilde)
 end
 
 qtilde = optimvar('qtilde', 7);
+
+% Setting constraints
 qtilde.LowerBound = -pi;
 qtilde.UpperBound = pi;
-
-% Create the objective function as an expression
-obj = objfun(qtilde);
-
-% Create an optimization problem
-prob = optimproblem('Objective', obj);
-
 posConstraint = k(qtilde(1),qtilde(2),qtilde(3),qtilde(4),qtilde(5),qtilde(6)) == r08_desired;
-prob.Constraints.constr = posConstraint;
 
-
-
-% Specify an initial point
+% Setting the inital conditions
 x0.qtilde = zeros(7,1);
+
+obj = objfun(qtilde);
+prob = optimproblem('Objective', obj);
+prob.Constraints.constr = posConstraint;
 
 % Solve the optimization problem
 [sol, fval] = solve(prob, x0);
 
-% % Display the results
-% disp('Optimal solution:');
-% disp(sol);
-% disp('Objective function value at optimal solution:');
-% disp(fval);
+% Display the results
+disp('Optimal solution:');
+disp(sol);
+disp('Objective function value at optimal solution:');
+disp(fval);
 
 q = sol.qtilde;
 r08_achieved = k(q(1),q(2),q(3),q(4),q(5),q(6))
+r08_desired
 
+% posError = abs(r08_achieved - r08_desired)
 
