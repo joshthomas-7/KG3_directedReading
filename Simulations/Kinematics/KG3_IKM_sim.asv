@@ -5,19 +5,68 @@ clear
 close all
 clc
 
+Ndof = 7;
+rho = 0.1;
+
 %% Setting up the KG3 direct kinematic model
 [transform_computed, Ts, Rs, As] = KG3_FKM;
 
 % Extracting the position vector
-f = transform_computed(1:end-1,end);
-W = eye(7); % joint weighting matrix
-H = [W zeros(7);
-     zeros(7) zeros(7)];
-f = []
-
+r08 = transform_computed(1:end-1,end);
 
 %% Setting up the robot model
 % Load the KG3 robot 
 gen3 = loadrobot("kinovaGen3", "DataFormat", "column");
 % show(gen3);
 showdetails(gen3)
+
+%% Place the KG3 in a random configuration
+q_config = randomConfiguration(gen3);
+% show(gen3, q_config)
+
+%% Find the homogenous transform
+transform = getTransform(gen3, q_config, "EndEffector_Link");
+r08_desired = transform(1:end-1,end);
+
+%% Constructing the IKM optimisation problem
+% Converting the symbolic expression for the pos
+k = matlabFunction(r08);
+
+% Define the objective function
+function f = objfun(qtilde)
+    Ndof = 7;
+    W = eye(Ndof); % joint weighting matrix
+    f = qtilde.'*W*qtilde;
+end
+
+qtilde = optimvar('qtilde', 7);
+qtilde.LowerBound = -pi;
+qtilde.UpperBound = pi;
+
+% Create the objective function as an expression
+obj = objfun(qtilde);
+
+% Create an optimization problem
+prob = optimproblem('Objective', obj);
+
+posConstraint = k(qtilde(1),qtilde(2),qtilde(3),qtilde(4),qtilde(5),qtilde(6)) == r08_desired;
+prob.Constraints.constr = posConstraint;
+
+
+
+% Specify an initial point
+x0.qtilde = zeros(7,1);
+
+% Solve the optimization problem
+[sol, fval] = solve(prob, x0);
+
+% % Display the results
+% disp('Optimal solution:');
+% disp(sol);
+% disp('Objective function value at optimal solution:');
+% disp(fval);
+
+q = sol.qtilde;
+r08_achieved = k(q(1),q(2),q(3),q(4),q(5),q(6))
+
+
