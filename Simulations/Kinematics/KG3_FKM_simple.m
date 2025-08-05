@@ -1,4 +1,4 @@
-function [pose] = KG3_FKM_simple(q)
+function [r08, R] = KG3_FKM_simple(q, Ts)
 % Creating the generic rotation matrix for each q
 n = length(q);
 Rs = {};
@@ -10,82 +10,64 @@ for i = 1:n
     Rs{i} = R;
 end
 
-% Creating the coordinate transformations
-Ts = {};
-
-T01 = [1 0 0 0;
-       0 -1 0 0;
-       0 0 -1 0.1564;
-       0 0 0 1];
-Ts{1} = T01;
-
-T12 = [1 0 0 0;
-       0 0 -1 0.0054;
-       0 1 0 -0.1284;
-       0 0 0 1];
-Ts{2} = T12;
-
-T23 = [1 0 0 0;
-    0 0 1 -0.2104;
-    0 -1 0 -0.00640;
-    0 0 0 1];
-Ts{3} = T23;
-
-T34 = [1 0 0 0;
-    0 0 -1 0.0064;
-    0 1 0 -0.2104;
-    0 0 0 1];
-Ts{4} = T34;
-
-T45 = [1 0 0 0;
-    0 0 1 -0.2084;
-    0 -1 0 -0.0064;
-    0 0 0 1];
-Ts{5} = T45;
-
-T56 = [1 0 0 0;
-    0 0 -1 0;
-    0 1 0 -0.1059;
-    0 0 0 1];
-Ts{6} = T56;
-
-T67 = [1 0 0 0;
-    0 0 1 -0.1059;
-    0 -1 0 0;
-    0 0 0 1];
-Ts{7} = T67;
-
-T78 = [1 0 0 0;
-       0 -1 0 0;
-       0 0 -1 -0.0615;
-       0 0 0 1];
+% % Creating the coordinate transformations
+% Ts = {};
+% 
+% T01 = [1 0 0 0;
+%        0 -1 0 0;
+%        0 0 -1 0.1564;
+%        0 0 0 1];
+% Ts{1} = T01;
+% 
+% T12 = [1 0 0 0;
+%        0 0 -1 0.0054;
+%        0 1 0 -0.1284;
+%        0 0 0 1];
+% Ts{2} = T12;
+% 
+% T23 = [1 0 0 0;
+%     0 0 1 -0.2104;
+%     0 -1 0 -0.00640;
+%     0 0 0 1];
+% Ts{3} = T23;
+% 
+% T34 = [1 0 0 0;
+%     0 0 -1 0.0064;
+%     0 1 0 -0.2104;
+%     0 0 0 1];
+% Ts{4} = T34;
+% 
+% T45 = [1 0 0 0;
+%     0 0 1 -0.2084;
+%     0 -1 0 -0.0064;
+%     0 0 0 1];
+% Ts{5} = T45;
+% 
+% T56 = [1 0 0 0;
+%     0 0 -1 0;
+%     0 1 0 -0.1059;
+%     0 0 0 1];
+% Ts{6} = T56;
+% 
+% T67 = [1 0 0 0;
+%     0 0 1 -0.1059;
+%     0 -1 0 0;
+%     0 0 0 1];
+% Ts{7} = T67;
+% 
+% T78 = [1 0 0 0;
+%        0 -1 0 0;
+%        0 0 -1 -0.0615;
+%        0 0 0 1];
 
 % Computing the transformation matrices
 T07 = eye(4);
-% As = {};
 for j = 1:n
-    % A = vpa(Ts{j} * Rs{j}, 4);
     A = Ts{j} * Rs{j};
-    % As{j} = A;
     T07 = T07*A;
-    % disp(['A' num2str(j-1) num2str(j) ' = ']);
-    % disp(A);
 end
 
-% T08 = simplify(T07*T78, 'Steps', 15);
-T08 = T07*T78;
+T08 = T07*Ts{8};
 r08 = T08(1:end-1,end);
-% quat = rotm2quat(T08);
-
-q0 = sqrt(1 + R(1,1) + R(2,2) + R(3,3)) / 2; % Scalar part
-q1 = (R(3,2) - R(2,3)) / (4 * q0); % First component
-q2 = (R(1,3) - R(3,1)) / (4 * q0); % Second component
-q3 = (R(2,1) - R(1,2)) / (4 * q0); % Third component
-
-% Normalize the quaternion to ensure it is a unit quaternion
-norm_q = sqrt(q0^2 + q1^2 + q2^2 + q3^2);
-quat = [q0;q1;q2;q3]/norm_q;
-
-pose = [r08;quat];
-
+R = T08(1:3,1:3);
 end

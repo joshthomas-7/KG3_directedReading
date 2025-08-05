@@ -1,0 +1,58 @@
+%%% Joshua Thomas
+%%% c3376353
+
+clear
+clc
+
+%% Setting up the robot model
+% Load the KG3 robot 
+gen3 = loadrobot("kinovaGen3", "DataFormat", "column");
+% show(gen3);
+showdetails(gen3)
+
+%% Place the KG3 in a random configuration
+q_config = randomConfiguration(gen3);
+% show(gen3, q_config)
+
+%% Find the homogenous transform
+transform = getTransform(gen3, q_config, "EndEffector_Link");
+
+% Extracting the position vector
+p_des = transform(1:end-1,end);
+% Extracting the rotation matrix 
+R_desired = transform(1:3,1:3);
+q_des = rotm2quat(R_desired);
+
+pose_des = [p_des;q_des.'];
+
+% Objective function
+fun = @(theta) objectiveFunctionQuat(theta, p_des, q_des);
+
+theta0 = zeros(7,1); % initial guess
+options = optimoptions('fmincon', 'Display', 'iter');
+lb = -pi*ones(7,1);
+ub = pi*ones(7,1);
+theta_sol = fmincon(fun, theta0, [], [], [], [], lb, ub, [], options);
+
+function cost = objectiveFunctionQuat(theta, p_des, q_des)
+    % Forward kinematics
+    [p, R] = KG3_FKM_simple(theta);
+    
+    % Convert rotation to quaternion
+    q = rotm2quat(R);  % returns [w x y z]
+    
+    % Normalize quaternions
+    q = q / norm(q);
+    q_des = q_des / norm(q_des);
+    
+    % Position error
+    pos_error = norm(p - p_des)^2;
+    
+    % Orientation error (dot product metric)
+    ori_error = 1 - abs(dot(q_des, q));
+    
+    % Weighted cost
+    cost = pos_error + 0.5*ori_error;
+end
+
+

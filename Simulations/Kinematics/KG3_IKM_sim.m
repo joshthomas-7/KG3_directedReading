@@ -1,15 +1,8 @@
 %%% Joshua Thomas
-%%% C3376353
+%%% c3376353
 
 clear
-close all
 clc
-
-Ndof = 7;
-rho = 0.1;
-
-%% Setting up the KG3 direct kinematic model
-[transform_computed, Ts, Rs, As] = KG3_FKM;
 
 %% Setting up the robot model
 % Load the KG3 robot 
@@ -22,60 +15,91 @@ q_config = randomConfiguration(gen3);
 % show(gen3, q_config)
 
 %% Find the homogenous transform
-transform = getTransform(gen3, q_config, "EndEffector_Link");
+transform = getTransform(gen3, q_config, "EndEffector_Link")
 
 % Extracting the position vector
-r08_desired = transform(1:end-1,end)
-
+p_des = transform(1:end-1,end);
 % Extracting the rotation matrix 
 R_desired = transform(1:3,1:3);
-% eul_desired = rotm2eul(R_desired)
-quat_desired = rotm2quat(R_desired);
-pose_desired = [r08_desired;quat_desired.'];
+q_des = rotm2quat(R_desired);
+pose_des = [p_des;q_des.'];
 
-%% Constructing the IKM optimisation problem
-% Converting the symbolic expression for the position vector to a function
-% k = matlabFunction(r08);
-% k = matlabFunction(pose);
 
-% Defining the objective function 
-function f = objfun(qtilde)
-    Ndof = 7;
-    W = eye(Ndof); % joint weighting matrix
-    f = qtilde.'*W*qtilde;
+%% Solving IKM as an optimisation problem
+
+Ts = KG3_preCompute();
+% Objective function
+% fun = @(q) objectiveFunctionQuat(q, p_des, q_des, Ts);
+
+
+q0 = zeros(7,1); % initial guess
+W = eye(7);
+rho = 0.1;
+rhoVec = 2.5e1*ones(7,1);
+options = optimoptions('fmincon', 'Display', 'none');
+lb = -pi*ones(7,1);
+ub = pi*ones(7,1);
+% q_sol = fmincon(fun, q0, [], [], [], [], lb, ub, [], options);
+
+funAlt = @(sigma) obj(sigma, W, rhoVec);
+
+sigma0 = zeros(2*7,1);
+lb_alt = [lb;zeros(7,1)];
+ub_alt = [ub;1e3*ones(7,1)];
+sigma_sol = fmincon(funAlt, sigma0, [], [], [], [], lb_alt, ub_alt,...
+    @(sigma) constraints(sigma, p_des, q_des, Ts), options);
+
+% function cost = objectiveFunctionQuat(q, p_des, qu_des, Ts)
+%     % Forward kinematics
+%     [p, R] = KG3_FKM_simple(q, Ts);
+% 
+%     % Convert rotation to quaternion
+%     qu = rotm2quat(R);
+% 
+%     % Position error
+%     pos_error = norm(p - p_des)^2;
+% 
+%     % Orientation error (dot product metric)
+%     ori_error = 1 - abs(dot(qu_des, qu));
+% 
+%     % Weighted cost
+%     cost = pos_error + 0.5*ori_error;
+% end
+
+
+function cost = obj(sigma, W, rhoVec)
+    
+    q = sigma(1:7);
+    s = sigma(8:end);
+    cost = q.'*W*q + rhoVec.'*s;
 end
 
-qtilde = optimvar('qtilde', 7);
+function [c, ceq] = constraints(sigma, p_des, q_des, Ts)
+    q = sigma(1:7);
+    s = sigma(8:end);
+    [p, R] = KG3_FKM_simple(q, Ts);
+    qu = rotm2quat(R);
 
-% Setting constraints
-qtilde.LowerBound = -pi;
-qtilde.UpperBound = pi;
-% posConstraint = k(qtilde(1),qtilde(2),qtilde(3),qtilde(4),qtilde(5),qtilde(6),qtilde(7)) == pose_desired;
-posConstraint = KG3_FKM_simple(qtilde) == pose_desired;
+    pose = [p;qu.'];
+    pose_des = [p_des;q_des.'];
 
-% Setting the inital conditions
-x0.qtilde = zeros(7,1);
+    c_upper = pose - s - pose_des;
+    c_lower = -pose -s + pose_des;
 
-obj = objfun(qtilde);
-prob = optimproblem('Objective', obj);
-prob.Constraints.constr = posConstraint;
+    c = [c_upper;c_lower];
+    ceq = [];
+end
 
-% Solve the optimization problem
-[sol, fval] = solve(prob, x0);
 
-% Display the results
-disp('Optimal solution:');
-disp(sol);
-disp('Objective function value at optimal solution:');
-disp(fval);
 
-q = sol.qtilde;
-% r08_achieved = k(q(1),q(2),q(3),q(4),q(5),q(6))
-% pose_achieved = k(q(1),q(2),q(3),q(4),q(5),q(6), q(7))
-pose_achieved = KG3_FKM_simple(q)
-pose_desired
 
-poseError = pose_achieved - pose_desired
+q = sigma_sol(1:7);
+transform_act = getTransform(gen3, q, "EndEffector_Link")
+% Extract the actual pose after solving the inverse kinematics
+[p_act, R_act] = KG3_FKM_simple(q, Ts);
+qu_act = rotm2quat(R_act);
 
-% posError = abs(r08_achieved - r08_desired)
+pose_des
+pose_act = [p_act; qu_act.']
 
+pose_err = pose_des - pose_act
