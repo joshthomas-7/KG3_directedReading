@@ -75,6 +75,6 @@ for j = 1:n
     % disp(['A' num2str(j-1) num2str(j) ' = ']);
     % disp(A);
 end
-
-T08 = simplify(T07*T78, 'Steps', 15);
+T08 = T07*T78;
+% T08 = simplify(T07*T78, 'Steps', 15);
 end

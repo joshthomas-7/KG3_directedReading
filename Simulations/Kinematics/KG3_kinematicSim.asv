@@ -1,5 +1,5 @@
-%% Joshua Thomas
-%% C3376353
+%%% Joshua Thomas
+%%% C3376353
 
 clear
 close all
@@ -48,12 +48,16 @@ p_comp = double(transform_computed(1:end-1,end));
 R_comp = double(transform_computed(1:3,1:3));
 q_comp = rotm2quat(R_comp);
 
-% Computing the desired pose and the computed pose
+
 pose_des = [p_des;q_des.'];
 pose_comp = [p_comp;q_comp.'];
 
 disp('True Pose & Computed Pose')
 disp([pose_des pose_comp])
 
-% Finding the error between the poses
 pose_err = pose_des - pose_comp
+
+%% Plotting
+figure(1)
+subplot(3,1,1)
+plot
