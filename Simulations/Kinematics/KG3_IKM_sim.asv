@@ -62,7 +62,7 @@ funAlt = @(sigma) obj(sigma, W, rhoVec);
 %% Simulating the trajectory Tracking
 
 N = width(x_ref);
-x_act = zeros(size(x_ref));
+pose_act = zeros(size(x_ref));
 for i=1:N
     % Extracting the desired pose at this time step
     x_des = x_ref(:,i);
@@ -79,12 +79,30 @@ for i=1:N
     % qu_act = rotm2quat(R_act);
     eul_act = rotm2eul(R_act);
 
-    x_act(:,i) = [p_act; eul_act.']; 
+    pose_act(:,i) = [p_act; eul_act.']; 
 
 end
 
 sigma_sol = fmincon(funAlt, sigma0, [], [], [], [], lb_alt, ub_alt,...
     @(sigma) constraints(sigma, p_des, eul_des, Ts), options);
+
+% function cost = objectiveFunctionQuat(q, p_des, qu_des, Ts)
+%     % Forward kinematics
+%     [p, R] = KG3_FKM_simple(q, Ts);
+% 
+%     % Convert rotation to quaternion
+%     qu = rotm2quat(R);
+% 
+%     % Position error
+%     pos_error = norm(p - p_des)^2;
+% 
+%     % Orientation error (dot product metric)
+%     ori_error = 1 - abs(dot(qu_des, qu));
+% 
+%     % Weighted cost
+%     cost = pos_error + 0.5*ori_error;
+% end
+
 
 function cost = obj(sigma, W, rhoVec)
     
@@ -133,28 +151,13 @@ end
 
 
 figure(1)
-subplot(2,1,1)
 hold on
 plot(x_ref(1,:), '--r', 'LineWidth',3)
-plot(x_act(1,:), 'ro', 'LineWidth', 3)
+plot(pose_act(1,:), 'ro', 'LineWidth', 3)
 plot(x_ref(2,:), '--b', 'LineWidth', 3)
-plot(x_act(2,:), 'bo', 'LineWidth', 3)
+plot(pose_act(2,:), 'bo', 'LineWidth', 3)
 plot(x_ref(3,:), '--g', 'LineWidth', 3)
-plot(x_act(3,:), 'go', 'LineWidth', 3)
+plot(pose_act(3,:), 'go', 'LineWidth', 3)
 
-ylabel('Position (m)', 'FontSize', 18)
-xlabel('Sample Point', 'FontSize', 18)
-legend('x*', 'x', 'y*', 'y', 'z*', 'z')
-
-subplot(2,1,2)
-hold on
-plot(x_ref(4,:), '--r', 'LineWidth',3)
-plot(x_act(4,:), 'ro', 'LineWidth', 3)
-plot(x_ref(5,:), '--b', 'LineWidth', 3)
-plot(x_act(5,:), 'bo', 'LineWidth', 3)
-plot(x_ref(6,:), '--g', 'LineWidth', 3)
-plot(x_act(6,:), 'go', 'LineWidth', 3)
-
-ylabel('Orientation (^\circ)', 'FontSize', 18)
-xlabel('Sample Point', 'FontSize', 18)
+ylabel
 legend('x*', 'x', 'y*', 'y', 'z*', 'z')
