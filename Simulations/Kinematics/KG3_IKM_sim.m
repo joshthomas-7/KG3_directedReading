@@ -39,10 +39,24 @@ x_ref = [0.4 0.4;
 
 %% Solving IKM as an optimisation problem
 
-%% Setting up the IKM optimisation problem
+% Setting up the IKM optimisation problem
 % Precomputing the forward kinematic matricies
 Ts = KG3_preCompute();
 
+% Precomputing the analytical jacobian
+[~,~,~,T_all] = KG3_FKM();
+% Computing the geometric jacobian
+J = geometricJacobian(T_all);
+% defining temporary symbolic variables for the ZYZ euler angles
+syms ph th ps
+T = [0 -sin(ph) cos(ph)*sin(th);
+    0 cos(ph) sin(ph)*sin(th);
+    1 0 cos(th)];
+TAi = [eye(3) zeros(3);
+    zeros(3) inv(T)];
+% Computing the analytical jacobian using the geometric jacobian.
+analyticalJacobian = simplify(TAi*J, 'Steps', 15);
+JA = matlabFunction(analyticalJacobian);
 
 q0 = zeros(7,1); % initial guess
 W = eye(7);
@@ -70,27 +84,30 @@ for i=1:N
     eul_des = x_des(4:end);
     
     % Solving the IKM for the desired pose
-    sigma_sol = fmincon(funAlt, sigma0, [], [], [], [], lb_alt, ub_alt,...
+    sigma_sol = fmincon(@(sigma)obj(sigma,sigma0,W,rhoVec), sigma0, [], [], [], [], lb_alt, ub_alt,...
         @(sigma) constraints(sigma, p_des, eul_des, Ts), options);
 
-    q = sigma_sol(1:7);
     % Extract the actual pose after solving the inverse kinematics
+    q = sigma_sol(1:7);
     [p_act, R_act] = KG3_FKM_simple(q, Ts);
-    % qu_act = rotm2quat(R_act);
     eul_act = rotm2eul(R_act);
-
     x_act(:,i) = [p_act; eul_act.']; 
+
+    % Using the previous joint configuration as the inital guess in the
+    % next IKM solve
+    sigma0 = [q;zeros(6,1)];
+    
 
 end
 
-sigma_sol = fmincon(funAlt, sigma0, [], [], [], [], lb_alt, ub_alt,...
-    @(sigma) constraints(sigma, p_des, eul_des, Ts), options);
 
-function cost = obj(sigma, W, rhoVec)
+function cost = obj(sigma, sigma0, W, rhoVec)
     
     q = sigma(1:7);
     s = sigma(8:end);
-    cost = q.'*W*q + rhoVec.'*s;
+    q0 = sigma0(1:7);
+
+    cost = (q-q0).'*W*(q-q0) + rhoVec.'*s;
 end
 
 function [c, ceq] = constraints(sigma, p_des, eul_des, Ts)
@@ -115,6 +132,9 @@ end
 
 
 
+% sigma_sol = fmincon(funAlt, sigma0, [], [], [], [], lb_alt, ub_alt,...
+%     @(sigma) constraints(sigma, p_des, eul_des, Ts), options);
+
 % q = sigma_sol(1:7);
 % transform_act = getTransform(gen3, q, "end_effector_link")
 % % Extract the actual pose after solving the inverse kinematics
@@ -130,8 +150,6 @@ end
 
 
 %% Plotting
-
-
 figure(1)
 subplot(2,1,1)
 hold on

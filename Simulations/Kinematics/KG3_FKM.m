@@ -68,9 +68,10 @@ T78 = [1 0 0 0;
 % Computing the transformation matrices
 T07 = eye(4);
 As = {};
+As{1} = eye(4);
 for j = 1:n
     A = vpa(Ts{j} * Rs{j}, 4);
-    As{j} = A;
+    As{j+1} = A;
     T07 = T07*A;
     % disp(['A' num2str(j-1) num2str(j) ' = ']);
     % disp(A);
