@@ -127,7 +127,7 @@ Ts = KG3_preCompute();
 
 
 q0 = zeros(7,1); % initial guess
-W = eye(7);
+W = 0.01*eye(7);
 rho = 0.1;
 rhoVec = 2.5e1*ones(6,1);
 options = optimoptions('fmincon', 'Display', 'none');
@@ -244,16 +244,16 @@ legend('x*', 'x', 'y*', 'y', 'z*', 'z')
 
 %% Animation of the configurations
 % 
-% figure(2);
-% for i = 1:N
-% 
-%     config = configs{i};
-%     % Show the robot in the current configuration
-%     show(gen3, config);
-% 
-%     % Pause to create an animation effect
-%     pause(1); % Adjust the pause duration as needed
-%  end
+figure(5);
+for i = 1:N
+
+    config = configs{i};
+    % Show the robot in the current configuration
+    show(gen3, config);
+
+    % Pause to create an animation effect
+    pause(dt); % Adjust the pause duration as needed
+ end
 
 
 function cost = obj(sigma, sigma0, W, rhoVec)

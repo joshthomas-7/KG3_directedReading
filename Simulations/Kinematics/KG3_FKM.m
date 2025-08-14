@@ -1,4 +1,4 @@
-function [T08,Ts,Rs,As] = KG3_FKM()
+function [T08,Ts] = KG3_FKM()
 
 %% Setting up the direct kinematics 
 
@@ -64,6 +64,7 @@ T78 = [1 0 0 0;
        0 -1 0 0;
        0 0 -1 -0.0615;
        0 0 0 1];
+Ts{8} = T78;
 
 % Computing the transformation matrices
 T07 = eye(4);
