@@ -1,7 +1,7 @@
 %%% Joshua Thomas
 %%% C3376353
 
-function J = KG3_GEOJ(T_all)
+function J = KG3_JGEO(T_all)
 
 % Extracting the end effector position vector
 T08 = T_all{end};

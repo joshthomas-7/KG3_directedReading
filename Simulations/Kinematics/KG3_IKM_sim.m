@@ -121,7 +121,7 @@ legend('\phi','\theta','\psi'); grid on;
 Ts = KG3_preCompute();
 
 % Precomputing the analytical jacobian
-[~,~,~,T_all] = KG3_FKM();
+% [~,~,~,T_all] = KG3_FKM();
 % % Computing the geometric jacobian
 % J = ComputeGeometricJacobian(T_all); %%possibly being computed wrong
 
@@ -159,10 +159,18 @@ for i=1:N
 
     % Extract the actual pose after solving the inverse kinematics
     q = sigma_sol(1:7);
-    configs{i} = q;
-    [p_act, R_act, ~] = KG3_FKM_simple(q, Ts);
+    % configs{i} = q;
+    % [p_act, R_act, ~] = KG3_FKM_simple(q, Ts);
+
+    transform = getTransform(gen3, q, 'end_effector_link');
+    R_act = transform(1:3,1:3);
+    p_act = transform(1:3,4);
+
     eul_act = rotm2eul(R_act);
     x_act(:,i) = [p_act; eul_act.']; 
+
+    
+
     % x_act(:,i) = [p_act; eul_act(1)]; 
 
     % Using the previous joint configuration as the inital guess in the
@@ -171,47 +179,6 @@ for i=1:N
     
 
 end
-
-%% Verifiying the solution
-dt = ts(2) - ts(1);
-q0 = configs{1};
-q = q0;
-q_history = zeros(length(q0), length(ts));
-x_history = zeros(length(x_ref(:,1)), length(ts));
-
-x0 = x_ref(:,1);
-x = x0;
-for k=1:length(ts)
-    xdot = dx_ref(:,k);
-
-    phi = x(4);
-    theta = x(5);
-
-    J = ComputeGeometricJacobian(T_all);
-    % J = geometricJacobian(gen3, q, 'end_effector_link');
-    
-    [~, T] = KG3_analyticalJacobian(phi, theta, J);
-    TA = [eye(3) zeros(3);
-    zeros(3) T];
-    ve = TA*xdot;
-
-    % The time derivative of the pose does not equal the ve vector ve =
-    % [dpe omega_e]
-    % angular velocities are w(i-1,i) = dtheta*z(i-1)
-    qdot = pinv(J) * ve;
-    q = q + qdot * dt;
-    q_history(:,k) = q;
-
-    [p_act, R_act, ~] = KG3_FKM_simple(q, Ts);
-    eul_act = rotm2eul(R_act);
-    x_history(:,k) = [p_act; eul_act.']; 
-
-
-    % Computing the current pose
-    x = x + xdot*dt;
-    
-end
-
 
 
 %% Plotting
@@ -240,20 +207,22 @@ plot(rad2deg(x_act(6,:)), 'go', 'LineWidth', 3)
 
 ylabel('Orientation (^\circ)', 'FontSize', 18)
 xlabel('Sample Point', 'FontSize', 18)
-legend('x*', 'x', 'y*', 'y', 'z*', 'z')
+legend('\phi', '\phi *','\theta', '\theta *','\psi', '\psi *')
+% legend('x*', 'x', 'y*', 'y', 'z*', 'z')
 
 %% Animation of the configurations
+
+% dt = ts(2) - ts(1);
+% figure(5);
+% for i = 1:N
 % 
-figure(5);
-for i = 1:N
-
-    config = configs{i};
-    % Show the robot in the current configuration
-    show(gen3, config);
-
-    % Pause to create an animation effect
-    pause(dt); % Adjust the pause duration as needed
- end
+%     config = configs{i};
+%     % Show the robot in the current configuration
+%     show(gen3, config);
+% 
+%     % Pause to create an animation effect
+%     pause(dt); % Adjust the pause duration as needed
+%  end
 
 
 function cost = obj(sigma, sigma0, W, rhoVec)
@@ -285,8 +254,10 @@ function [cineq, ceq, gcineq] = constraints(sigma, p_des, eul_des, Ts)
     % Inequality constraint Jacobian
     phi = eul(1);
     theta = eul(2);
-    J = ComputeGeometricJacobian(T_all);
-    JA = KG3_analyticalJacobian(phi,theta, J);
+    % J = ComputeGeometricJacobian(T_all);
+    % JA = KG3_analyticalJacobian(phi,theta, J);
+    J = KG3_JGEO(T_all);
+    JA = KG3_JA(phi,theta, J);
 
     gcineq = zeros(12, 13);
     gcineq(1:6, 1:7) = JA;         % ∂cineq1/∂q = JA
