@@ -7,8 +7,13 @@ classdef KG3
         pose  % pose of the KG3.
         J % geometric jacobian.
         mArr %kg, array each stores the mass of each link in the KG3.
-        COM_coords % array wich stores the location of the centre of mass (COM) of each link.
+        T_COM % cells which store the transformations between the COMs and the preeceding link frames.
+        r_COM
+        AC_all
+        J_COM % cells which store the COM geometric Jacobians.
         I    % cells which store the inertia tensors of each link referred to the COM.
+        q     % current joint configuration
+        M     % mass matrix 
     end
 
     methods
@@ -16,42 +21,69 @@ classdef KG3
             %KG3 Construct an instance of this class
             % Precomputes the homogenous transformations between each frame
             % of the KG3 
-            [obj.Ts, obj.mArr, obj.I] = KG3.preCompute();
+            [obj.Ts, obj.mArr, obj.T_COM, obj.I, obj.r_COM] = KG3.preCompute();
         end
 
 
         function obj = FKM(obj, q)
-            % Computes the forward kinematics of the KG3 for a given joint
-            % configuration (q)
-
-            % Creating the generic rotation matrix for each q
-            n = length(q);
-            Rs = {};
-            for i = 1:n
-                R = [cos(q(i)), -sin(q(i)), 0, 0;
-                     sin(q(i)),  cos(q(i)), 0, 0;
-                     0,        0,       1, 0;
-                     0,        0,       0, 1];
-                Rs{i} = R;
+            
+            obj.q = q;
+            N = length(q);  % 7 joints
+            L = length(obj.Ts); % 8 links including end-effector
+            
+            % Build the rotation matricies for each joint
+            Rs = cell(1,N);
+            for i = 1:N
+                Rs{i} = [cos(q(i)) -sin(q(i)) 0 0;
+                         sin(q(i))  cos(q(i)) 0 0;
+                         0           0        1 0;
+                         0           0        0 1];
             end
-
-            % Computing the transformation matrices
-            obj.T_all = {};
-            T07 = eye(4);
-            % T_all{1} = eye(4);
-            for j = 1:n
+        
+            % Use the precomputed frame transformations and the rotation
+            % matricies to compute homogenous transformation matricies for
+            % each joint
+            obj.T_all = cell(1,N);
+            T_base = eye(4);
+            for j = 1:N
                 A = obj.Ts{j} * Rs{j};
-                T07 = T07*A;
-                obj.T_all{j} = T07;
+                T_base = T_base * A;
+                obj.T_all{j} = T_base;
             end
-
-            T08 = T07*obj.Ts{8};
-            obj.T_all{8} = T08;
-            r08 = T08(1:end-1,end);
-            R = T08(1:3,1:3);
-            eul = rotm2eul(R);
-            obj.pose = [r08;eul.'];
+        
+            % Compute the COM homogenous transformation matricies
+            obj.AC_all = cell(1,L);
+            for j = 1:L
+                if j == 1
+                    obj.AC_all{1} = obj.T_COM{1} * Rs{1};
+                elseif j <= N
+                    obj.AC_all{j} = obj.T_all{j-1} * obj.T_COM{j} * Rs{j};
+                else
+                    % 8th link (end-effector) – no Rs, just multiply by previous joint transform
+                    obj.AC_all{j} = obj.T_all{N} * obj.T_COM{j};
+                end
+            end
     
+        end
+
+        function obj = JGEO_COM(obj)
+            N = 7;
+            L = 8;
+            obj.J_COM = cell(1,L);
+            for i = 1:L
+                Jci = zeros(6,N); % 6x7 Jacobian for link i
+                pCi = obj.AC_all{i}(1:3,4); % COM position in base frame
+                for j = 1:min(i,N) % only joints affecting this link
+                    p_j = obj.T_all{j}(1:3,4);      % joint origin
+                    z_j = obj.T_all{j}(1:3,1:3)*[0;0;1]; % joint axis in base
+                    Jv = cross(z_j, pCi - p_j);     % linear velocity part
+                    Jw = z_j;                        % angular velocity part
+                    Jci(:,j) = [Jv; Jw];
+                end
+                obj.J_COM{i} = Jci;
+            end
+           
+
         end
 
         function obj = JGEO(obj)
@@ -82,16 +114,32 @@ classdef KG3
 
         %% Computes the mass matrix of the KG3 in its current joint configuration
         function obj = MassMatrix(obj, q)
-            % Computing all of the transformation matricies
+            N = length(q);  % 7 joints
+            L = length(obj.Ts); % 8 links including end-effector
+            
+            % Compute the forward kinematics to update the transformation
+            % matricies
             obj = FKM(obj,q);
-            % Compute the all of the geometric jacobians
+            % Use the transformation matricies to update the COM Jacobians
+            obj = JGEO_COM(obj);
+            
+            % Compute the elements of the mass matrix
+            obj.M = zeros(N,N);
+            for i = 1:L
+                mi = obj.mArr{i};                  % mass
+                ICi = obj.I{i};                    % inertia in link frame
+                R0i = obj.AC_all{i}(1:3,1:3);      % rotation to base frame
+                Jci = obj.J_COM{i};                 % 6x7 Jacobian
+                M_link = Jci' * [mi*eye(3) zeros(3); zeros(3) R0i*ICi*R0i'] * Jci;
+                obj.M = obj.M + M_link;
+            end
 
         end
 
     end
 
     methods (Static)
-        function [Ts, mArr, I] = preCompute()
+        function [Ts, mArr, TC, I, rC] = preCompute()
             % Creating the coordinate transformations
             Ts = {};
             
@@ -145,8 +193,28 @@ classdef KG3
 
             %% Initialising properties required for dynamics simulation
             % Defining the mass of each link   %vision module = 0.500
-            mArr = [1.697 1.377 1.1636 1.1636 0.930 0.678 0.678 0.364];
+            mArr = {1.697, 1.377, 1.1636, 1.1636, 0.930, 0.678, 0.678, 0.364};
 
+            % Defining the centre of mass position vectors (pCi = pi + rCi)
+            rC = {};
+            rC{1} = [-0.000648;-0.000166;0.084487];
+            rC{2} = [-0.000023; -0.010364; -0.073360];
+            rC{3} = [-0.000044; -0.099580; -0.013278];
+            rC{4} = [-0.000044; -0.006641; -0.117892];
+            rC{5} = [-0.000018; -0.075478; -0.015006];
+            rC{6} = [0.000001; -0.009432; -0.063883];
+            rC{7} = [0.000001; -0.045483; -0.009650];
+            rC{8} = [-0.000093; 0.000132; -0.022905];
+
+            TC = {};
+
+            for i=1:8
+                TC{i} = [eye(3,3) rC{i};
+                         zeros(1,3) 1];
+            end
+
+
+            
             % Defining the inertia tensors for each link
             % Ii = [Ixx Ixy Ixz Iyy Iyz Izz]
             % I_vecs = [I0;I2;...I7]
@@ -179,5 +247,6 @@ classdef KG3
             end
 
         end
+
     end
 end

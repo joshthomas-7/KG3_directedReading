@@ -14,16 +14,18 @@ q = homeConfiguration(gen3);
 
 %% Validating the mass matrix calculations
 M = massMatrix(gen3)
+[comLocation,comJac] = centerOfMass(gen3);
 
 % Need all transformation matricies to compute the geometric jacobian
 
 % Initialising the KG3 class
 myKG3 = KG3();
+myKG3 = myKG3.MassMatrix(q);
+myKG3.M
 
 
-
-%% Computing the joint accelerations in the home configuration 
-% Using the matlab model
-qddot_mat = forwardDynamics(gen3)
-
-% Using the derived model
+% %% Computing the joint accelerations in the home configuration 
+% % Using the matlab model
+% qddot_mat = forwardDynamics(gen3)
+% 
+% % Using the derived model
