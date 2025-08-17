@@ -159,7 +159,7 @@ for i=1:N
 
     % Extract the actual pose after solving the inverse kinematics
     q = sigma_sol(1:7);
-    % configs{i} = q;
+    configs{i} = q;
     % [p_act, R_act, ~] = KG3_FKM_simple(q, Ts);
 
     transform = getTransform(gen3, q, 'end_effector_link');
@@ -212,17 +212,17 @@ legend('\phi', '\phi *','\theta', '\theta *','\psi', '\psi *')
 
 %% Animation of the configurations
 
-% dt = ts(2) - ts(1);
-% figure(5);
-% for i = 1:N
-% 
-%     config = configs{i};
-%     % Show the robot in the current configuration
-%     show(gen3, config);
-% 
-%     % Pause to create an animation effect
-%     pause(dt); % Adjust the pause duration as needed
-%  end
+dt = ts(2) - ts(1);
+figure(5);
+for i = 1:N
+
+    config = configs{i};
+    % Show the robot in the current configuration
+    show(gen3, config);
+
+    % Pause to create an animation effect
+    pause(dt); % Adjust the pause duration as needed
+ end
 
 
 function cost = obj(sigma, sigma0, W, rhoVec)

@@ -6,7 +6,7 @@ close all
 clc
 
 %% Setting up the KG3 direct kinematic model
-[transform_computed, Ts, Rs, As] = KG3_FKM;
+[transform_computed, Ts, Rs, As] = KG3_FKM();
 
 
 %% Setting up the robot model
