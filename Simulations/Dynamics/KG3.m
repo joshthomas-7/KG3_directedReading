@@ -4,13 +4,19 @@ classdef KG3
     properties
         Ts
         T_all % all transformation matricies for the KG3 T0i (referred to base frame).
+        dAdqi_all % cells which store the derivatives of the homogenous transformation matricies
+
         pose  % pose of the KG3.
         J % geometric jacobian.
         mArr %kg, array each stores the mass of each link in the KG3.
         T_COM % cells which store the transformations between the COMs and the preeceding link frames.
         r_COM
+
         AC_all
+        dACidqi_all % cells which store the derivatives of the COM homogeneous transformation matricies 
         J_COM % cells which store the COM geometric Jacobians.
+
+
         I    % cells which store the inertia tensors of each link referred to the COM.
         q     % current joint configuration
         M     % mass matrix 
@@ -30,6 +36,7 @@ classdef KG3
             obj.q = q;
             N = length(q);  % 7 joints
             L = length(obj.Ts); % 8 links including end-effector
+            xi = [0;0;0;0;0;1]; % constant local twist for each joint (all joints revolute)
             
             % Build the rotation matricies for each joint
             Rs = cell(1,N);
@@ -44,24 +51,36 @@ classdef KG3
             % matricies to compute homogenous transformation matricies for
             % each joint
             obj.T_all = cell(1,N);
+            obj.dAdqi_all = cell(1,N);
             T_base = eye(4);
             for j = 1:N
                 A = obj.Ts{j} * Rs{j};
                 T_base = T_base * A;
                 obj.T_all{j} = T_base;
+                
+                % Computing the derivative of each Ai-1_i transformation
+                obj.dAdqi_all{j} = KG3.hatSE3(xi)*A;   
             end
         
             % Compute the COM homogenous transformation matricies
             obj.AC_all = cell(1,L);
+            obj.dACidqi_all = cell(1,L);
             for j = 1:L
+                % Ajmin1_Cj = obj.T_COM{j} * Rs{j}
                 if j == 1
-                    obj.AC_all{1} = obj.T_COM{1} * Rs{1};
+                    Ajmin1_Cj = Rs{1} * obj.T_COM{1};
+                    obj.AC_all{1} = Ajmin1_Cj;
                 elseif j <= N
-                    obj.AC_all{j} = obj.T_all{j-1} * obj.T_COM{j} * Rs{j};
+                    Ajmin1_Cj = Rs{j} * obj.T_COM{j};
+                    obj.AC_all{j} = obj.T_all{j-1} * Ajmin1_Cj;
                 else
+                    Ajmin1_Cj = obj.T_COM{j};
                     % 8th link (end-effector) – no Rs, just multiply by previous joint transform
-                    obj.AC_all{j} = obj.T_all{N} * obj.T_COM{j};
+                    obj.AC_all{j} = obj.T_all{N} * Ajmin1_Cj;
                 end
+
+                % Computing the COM transformation derivatives
+                obj.dACidqi_all{j} = KG3.hatSE3(xi)*Ajmin1_Cj;
             end
     
         end
@@ -74,6 +93,18 @@ classdef KG3
                 Jci = zeros(6,N); % 6x7 Jacobian for link i
                 pCi = obj.AC_all{i}(1:3,4); % COM position in base frame
                 for j = 1:min(i,N) % only joints affecting this link
+                    % 
+                    % if j == 1
+                    %     p_jm1 = [0;0;0];                  % base origin
+                    %     z_jm1 = [0;0;1];                   % base axis
+                    % else
+                    %     p_jm1 = obj.T_all{j-1}(1:3,4);    
+                    %     z_jm1 = obj.T_all{j-1}(1:3,1:3)*[0;0;1];
+                    % end
+                    % Jv = cross(z_jm1, pCi - p_jm1);
+                    % Jw = z_jm1;
+                    % Jci(:,j) = [Jv; Jw];
+
                     p_j = obj.T_all{j}(1:3,4);      % joint origin
                     z_j = obj.T_all{j}(1:3,1:3)*[0;0;1]; % joint axis in base
                     Jv = cross(z_j, pCi - p_j);     % linear velocity part
@@ -246,6 +277,18 @@ classdef KG3
                         Ixz Iyz Izz];
             end
 
+        end
+
+        function G = hatSE3(xi)
+            % Computes the generating matrix for SE3 for a given twist vector
+            G = [KG3.skew(xi(4:6)) xi(1:3); zeros(1,4)];
+        end
+
+        function S = skew(u)
+            % Generates a skew symetric matrix from a given vector u
+            S = [0 -u(3) u(2);
+                u(3) 0 -u(1);
+                -u(2) u(1) 0];
         end
 
     end

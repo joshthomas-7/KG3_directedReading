@@ -9,8 +9,12 @@ classdef KG3
         mArr %kg, array each stores the mass of each link in the KG3.
         T_COM % cells which store the transformations between the COMs and the preeceding link frames.
         r_COM
+
         AC_all
+        dACidqi_all % cells which store the derivatives of the COM homogeneous transformation matricies 
         J_COM % cells which store the COM geometric Jacobians.
+
+
         I    % cells which store the inertia tensors of each link referred to the COM.
         q     % current joint configuration
         M     % mass matrix 
@@ -30,8 +34,9 @@ classdef KG3
             obj.q = q;
             N = length(q);  % 7 joints
             L = length(obj.Ts); % 8 links including end-effector
+            xi = [0;0;0;0;0;1]; % constant local twist for each joint (all joints revolute)
             
-            % Build the rotation matricie 
+            % Build the rotation matricies for each joint
             Rs = cell(1,N);
             for i = 1:N
                 Rs{i} = [cos(q(i)) -sin(q(i)) 0 0;
@@ -40,7 +45,9 @@ classdef KG3
                          0           0        0 1];
             end
         
-            %% Step 2: Joint transforms in base frame
+            % Use the precomputed frame transformations and the rotation
+            % matricies to compute homogenous transformation matricies for
+            % each joint
             obj.T_all = cell(1,N);
             T_base = eye(4);
             for j = 1:N
@@ -49,17 +56,25 @@ classdef KG3
                 obj.T_all{j} = T_base;
             end
         
-            %% Step 3: COM transforms in base frame
+            % Compute the COM homogenous transformation matricies
             obj.AC_all = cell(1,L);
+            obj.dACidqi_all = c
             for j = 1:L
+                % Ajmin1_Cj = obj.T_COM{j} * Rs{j}
                 if j == 1
-                    obj.AC_all{1} = obj.T_COM{1} * Rs{1};
+                    Ajmin1_Cj = Rs{j} * obj.T_COM{j} ;
+                    obj.AC_all{1} = Ajmin1_Cj;
                 elseif j <= N
-                    obj.AC_all{j} = obj.T_all{j-1} * obj.T_COM{j} * Rs{j};
+                    Ajmin1_Cj = Rs{j} * obj.T_COM{j};
+                    obj.AC_all{j} = obj.T_all{j-1} * Ajmin1_Cj;
                 else
+                    Ajmin1_Cj = obj.T_COM{j};
                     % 8th link (end-effector) – no Rs, just multiply by previous joint transform
-                    obj.AC_all{j} = obj.T_all{N} * obj.T_COM{j};
+                    obj.AC_all{j} = obj.T_all{N} * Ajmin1_Cj;
                 end
+
+                % Computing the COM transformation derivatives
+                obj.dACidqi_all{i} = 
             end
     
         end
@@ -244,6 +259,18 @@ classdef KG3
                         Ixz Iyz Izz];
             end
 
+        end
+
+        function G = hatSE3(xi)
+            % Computes the generating matrix for SE3 for a given twist vector
+            G = [KG3.skew(xi(4:6)) xi(1:3); zeros(1,4)];
+        end
+
+        function S = skew(u)
+            % Generates a skew symetric matrix from a given vector u
+            S = [0 -u(3) u(2);
+                u(3) 0 -u(1);
+                -u(2) u(1) 0];
         end
 
     end
