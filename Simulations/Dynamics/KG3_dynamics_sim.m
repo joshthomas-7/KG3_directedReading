@@ -15,7 +15,8 @@ gen3 = loadrobot("kinovaGen3", "DataFormat", "column", "Version", 2, Gravity=[0 
 showdetails(gen3)
 
 % Getting the home configuration
-q = homeConfiguration(gen3);
+% q = homeConfiguration(gen3);
+q = randomConfiguration(gen3);
 
 %% Validating the mass matrix calculations
 M = massMatrix(gen3, q)
