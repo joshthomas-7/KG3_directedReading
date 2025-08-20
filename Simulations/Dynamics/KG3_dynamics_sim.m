@@ -28,11 +28,16 @@ M = massMatrix(gen3, q)
 myKG3 = KG3();
 myKG3 = myKG3.MassMatrix(q);
 myKG3.M
+myKG3 = myKG3.HESSIAN_GEO_COM();
+
+
+%% Testing the velocity product
+dq = 1e-1*q;
+jointTorq = velocityProduct(gen3, q, dq)
+
+% myKG3.M = M;
+myKG3 = myKG3.CoriolisMatrix(q, dq);
+estTorq = myKG3.C*dq
 
 
 
-% %% Computing the joint accelerations in the home configuration 
-% % Using the matlab model
-% qddot_mat = forwardDynamics(gen3)
-% 
-% % Using the derived model

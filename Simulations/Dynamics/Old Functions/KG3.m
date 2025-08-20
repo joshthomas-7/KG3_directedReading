@@ -501,118 +501,183 @@ classdef KG3
             obj.dJdq_COM = dJ_COM;
         end
 
+
         function obj = compute_dT_FD(obj, q, eps_fd)
-            % Compute derivatives of T_all w.r.t. q using finite differences
+            % Compute derivatives of T_all (base -> COM_i) w.r.t. q using finite differences
+            %
+            % Inputs:
+            %   obj     : robot object with obj.FKM(q) returning T_all
+            %   q       : Nx1 joint vector
+            %   eps_fd  : finite difference step (default 1e-8)
+            %
+            % Outputs:
+            %   dT      : cell{1..L} of 4x4xN, dT{i}(:,:,k) = dT_i/dq_k
+            %   dR      : cell{1..L} of 3x3xN, rotation derivatives
+            %   dp      : cell{1..L} of 3xN, translation derivatives
             
             if nargin < 3
                 eps_fd = 1e-8;
             end
             
             L = numel(obj.T_all);   % number of links
-            n = numel(q);           % number of joints
+            n = numel(q);
             
-            % Initialize derivative tensors
-            obj.dTdq_all = cell(L, 1);
-            for i = 1:L
-                obj.dTdq_all{i} = zeros(4, 4, n);
-            end
+            % Preallocate
+            dT = cell(L,1);
+            dR = cell(L,1);
+            dp = cell(L,1);
+            
+            % Base transform at current q
+            T0 = obj.FKM(q).T_all;
             
             for k = 1:n
                 % Perturb joint k
                 qp = q; qm = q;
                 qp(k) = qp(k) + eps_fd;
                 qm(k) = qm(k) - eps_fd;
-                
-                % Create temporary objects to avoid overwriting
-                obj_temp_p = obj.copyKG3(); 
-                obj_temp_m = obj.copyKG3();
-                
-                % Create new instances and compute FKM
-                obj_temp_p = obj_temp_p.FKM(qp);
-                obj_temp_m = obj_temp_m.FKM(qm);
-                
-                Tp_all = obj_temp_p.T_all;
-                Tm_all = obj_temp_m.T_all;
-                
+            
+                % Compute forward kinematics at perturbed q
+                Tp_all = obj.FKM(qp).T_all;
+                Tm_all = obj.FKM(qm).T_all;
+            
                 for i = 1:L
-                    % Finite difference approximation
+                    % Finite difference
                     obj.dTdq_all{i}(:,:,k) = (Tp_all{i} - Tm_all{i}) / (2*eps_fd);
                 end
             end
+
         end
-        
+
+
         function obj = compute_dT_COM_FD(obj, q, eps_fd)
-            % Compute derivatives of COM transforms w.r.t. q using finite differences
+            % Compute derivatives of COM transforms (obj.AC_all) w.r.t. q using finite differences
+            %
+            % Inputs:
+            %   obj     : robot object with obj.FKM(q) updating obj.AC_all
+            %   q       : Nx1 joint vector
+            %   eps_fd  : finite difference step (default 1e-8)
+            %
+            % Outputs:
+            %   dT      : cell{1..L} of 4x4xN, dT{i}(:,:,k) = d(T_COM_i)/dq_k
+            %   dR      : cell{1..L} of 3x3xN, rotation derivatives
+            %   dp      : cell{1..L} of 3xN, translation derivatives
             
             if nargin < 3
                 eps_fd = 1e-8;
             end
             
-            % Ensure AC_all is computed for current q
-            obj = obj.FKM(q);
-            
             L = numel(obj.AC_all);   % number of COM links
-            n = numel(q);            % number of joints
+            n = numel(q);
             
-            % Initialize derivative tensors
-            obj.dACdq_all = cell(L, 1);
-            for i = 1:L
-                obj.dACdq_all{i} = zeros(4, 4, n);
-            end
+            % Preallocate
+            dT = cell(L,1);
+            dR = cell(L,1);
+            dp = cell(L,1);
+            
+            % Base COM transforms at current q
+            obj = obj.FKM(q);              % Updates obj.AC_all
+            T0 = obj.AC_all;
             
             for k = 1:n
                 % Perturb joint k
                 qp = q; qm = q;
                 qp(k) = qp(k) + eps_fd;
                 qm(k) = qm(k) - eps_fd;
-                
-                % Create temporary objects
-                obj_temp_p = obj.copyKG3();  % Create independent copies
-                obj_temp_m = obj.copyKG3();
-                
-                % Compute forward kinematics at perturbed configurations
-                obj_temp_p = obj_temp_p.FKM(qp);
-                obj_temp_m = obj_temp_m.FKM(qm);
-                
-                Tp_all = obj_temp_p.AC_all;
-                Tm_all = obj_temp_m.AC_all;
-                
+            
+                % Compute forward kinematics at perturbed q
+                obj = obj.FKM(qp); Tp_all = obj.AC_all;
+                obj = obj.FKM(qm); Tm_all = obj.AC_all;
+            
                 for i = 1:L
-                    % Finite difference approximation
+                    % Finite difference
+                    % dT{i}(:,:,k) = (Tp_all{i} - Tm_all{i}) / (2*eps_fd);
                     obj.dACdq_all{i}(:,:,k) = (Tp_all{i} - Tm_all{i}) / (2*eps_fd);
+                    % dR{i}(:,:,k) = dT{i}(1:3,1:3,k);
+                    % dp{i}(:,k)    = dT{i}(1:3,4,k);
                 end
             end
-        end
-        
-        function obj_copy = copyKG3(obj)
-            % Create a deep copy of the KG3 object
-            obj_copy = KG3();
-
-            % Copy all relevant properties
-            obj_copy.q = obj.q;
-            obj_copy.Ts = obj.Ts;
-            obj_copy.T_all = obj.T_all;
-            obj_copy.Aij_all = obj.Aij_all;
-            obj_copy.AC_all = obj.AC_all;
-            obj_copy.T_COM = obj.T_COM;
-            obj_copy.r_COM = obj.r_COM;
-            obj_copy.mArr = obj.mArr;
-            obj_copy.I = obj.I;
-            obj_copy.J = obj.J;
-            obj_copy.J_COM = obj.J_COM;
-
-            % Initialize derivative tensors
-            if ~isempty(obj.dTdq_all)
-                obj_copy.dTdq_all = obj.dTdq_all;
-            end
-            if ~isempty(obj.dACdq_all)
-                obj_copy.dACdq_all = obj.dACdq_all;
-            end
-            if ~isempty(obj.dJdq_COM)
-                obj_copy.dJdq_COM = obj.dJdq_COM;
-            end
+           
         end
 
+
+
+        % function obj = HESSIAN_GEO_COM(obj)
+        %     % Computes the geometric hessian for the COM
+        % 
+        %     % Number of links and joints
+        %     L = length(obj.AC_all); 
+        %     N = length(obj.T_all);
+        %     dAdq_all = obj.dAdq_all;
+        %     dACdq_all = obj.dACdq_all;
+        % 
+        %     % Extracting position derivatives
+        %     % L = length(dACdq_all);
+        %     drCdq = cell(1,L);
+        %     for i=1:L
+        %         dA0Cidq = dACdq_all{i};
+        %         drCdq{i} = squeeze(dA0Cidq(1:3,4, :));
+        %     end
+        % 
+        %     % Extracting z position derivatives
+        %     dzdq = cell(1,L);
+        %     dpdq = cell(1,L);
+        %     dzdq{1} = zeros(3, 7);
+        %     dpdq{1} = zeros(3, 7);
+        %     for i=2:L
+        %         dA0idq = dAdq_all{i};
+        %         dzdq{i} = squeeze(dA0idq(1:3,3, :));
+        %         dpdq{i} = squeeze(dA0idq(1:3,4, :));
+        % 
+        %     end
+        % 
+        % 
+        % 
+        %     % Preallocate storage for Hessians
+        %     dJ_COM = cell(1, L);   % each cell will hold a 6xNxN tensor
+        %     dJ_COM{1} = zeros(6,N,N);
+        % 
+        %     for i = 1:L
+        %         % COM position
+        %         rCi = obj.AC_all{i}(1:3,4);
+        % 
+        %         % Derivative of COM wrt q
+        %         % drCidq = squeeze(obj.dACdq_all{i}(1:3,4,:)); % 3xN
+        %         drCidq = drCdq{i};
+        % 
+        %         % Initialise derivative of Jacobian for COM i
+        %         dJci = zeros(6, N, N);
+        % 
+        %         if i > 1
+        % 
+        %             % Loop over joints j that affect link i
+        %             for j = 1:min(i-1,N)
+        %                 % Joint origin and axis
+        %                 p_j = obj.T_all{j}(1:3,4);
+        %                 z_j = obj.T_all{j}(1:3,1:3)*[0;0;1];
+        % 
+        %                 % Derivatives wrt all qk
+        %                 dpjdq = dpdq{j};
+        %                 dzjdq = dzdq{j};
+        % 
+        %                 % For each derivative wrt qk
+        %                 for k = 1:7
+        %                     dJv = cross(dzjdq(:,k), (rCi - p_j)) ...
+        %                         + cross(z_j, (drCidq(:,k) - dpjdq(:,k)));
+        % 
+        %                     dJw = dzjdq(:,k);
+        % 
+        %                     dJci(:,j,k) = [dJv; dJw];
+        %                 end
+        %             end
+        % 
+        %         end
+        % 
+        %         % Store Hessian for COM i
+        %         dJ_COM{i} = dJci;
+        %     end
+        % 
+        %     obj.dJdq_COM = dJ_COM;
+        % end
         
         %% Computes the mass matrix of the KG3 in its current joint configuration
         function obj = MassMatrix(obj, q)
@@ -639,206 +704,87 @@ classdef KG3
             end
 
         end
-
+        
+        %% Computes the coriolis matrix of the KG3
         function obj = CoriolisMatrix(obj, q, dqdt)
-            % Computes the coriolis matrix of the KG3
             
-            % Update forward kinematics and derivatives
+            % Updating forward kinematics
             obj = obj.FKM(q);
-            obj = obj.JGEO_COM();
+            T_all =obj.T_all;
             
-            % Initialize derivative tensors if not already computed
-            if isempty(obj.dTdq_all)
-                obj.dTdq_all = cell(1, length(obj.T_all));
-                for i = 1:length(obj.T_all)
-                    obj.dTdq_all{i} = zeros(4, 4, 7);
-                end
+            % Extracting the rotation matricies and their derivatives
+            N = length(T_all);
+            R_all = cell(1,N);
+            dR0dq_all = cell(1,N);
+            for i=1:N
+                R_all{i} = T_all{i}(1:3,1:3);
+                dR0dq_all{i} = obj.dTdq_all{i}(1:3,1:3,:);
             end
+
+            % Extracting the COM Jacobian derivatives
+            dJdq_COM = obj.dJdq_COM;
             
-            if isempty(obj.dACdq_all)
-                obj.dACdq_all = cell(1, length(obj.AC_all));
-                for i = 1:length(obj.AC_all)
-                    obj.dACdq_all{i} = zeros(4, 4, 7);
-                end
-            end
-            
-            % Compute transformation derivatives using finite differences
-            obj = obj.compute_dT_FD(q);
-            obj = obj.compute_dT_COM_FD(q);
-            
-            % Compute Jacobian derivatives (Hessian)
-            obj = obj.HESSIAN_GEO_COM();
-            
-            % Extract rotation matrices and their derivatives
-            N = length(obj.T_all);
-            R_all = cell(1, N);
-            dR0dq_all = cell(1, N);
-            for i = 1:N
-                R_all{i} = obj.T_all{i}(1:3, 1:3);
-                if ~isempty(obj.dTdq_all{i})
-                    dR0dq_all{i} = obj.dTdq_all{i}(1:3, 1:3, :);
-                else
-                    dR0dq_all{i} = zeros(3, 3, 7);
-                end
-            end
-            
-            % Computing the mass matrix derivatives
-            L = length(obj.AC_all);
-            dMdq = zeros(7, 7, 7);
-            
-            for k = 1:7
-                for i = 1:L
-                    dJdq_COMi = obj.dJdq_COM{i}; % Should be 6x7x7
+            %% Computing the mass matrix derivatives
+            dMdq = zeros(7,7,7);
+            for k=1:7
+                % Compute dMdq(:,:,k)
+                for i=1:7
+                    % Complete each term for dMdq(:,:,k)
+
+                    dJdq_COMi = dJdq_COM{i}; % Is currently a 6x8x8, but J_COMi is 6x7
                     mi = obj.mArr{i};
-                    
-                    % Handle rotation matrix derivatives safely
-                    if i <= length(R_all) && i <= length(dR0dq_all)
-                        R0i = R_all{i};
-                        dR0idq = dR0dq_all{i};
-                    else
-                        % For end-effector or if missing, use identity
-                        R0i = eye(3);
-                        dR0idq = zeros(3, 3, 7);
-                    end
-                    
+                    R0i = R_all{i};
+                    dR0idq = dR0dq_all{i};
                     Icii = obj.I{i};
-                    J_COMi = obj.J_COM{i}; % Should be 6x7
-                    
-                    % Check dimensions
-                    if size(dJdq_COMi, 2) ~= 7 || size(dJdq_COMi, 3) ~= 7
-                        warning('Dimension mismatch in dJdq_COM{%d}: expected 6x7x7, got %s', ...
-                            i, mat2str(size(dJdq_COMi)));
-                        continue;
-                    end
-                    
-                    % Compute inertia matrices
+                    J_COMi = obj.J_COM{i};
+
                     Si = blkdiag(mi*eye(3), R0i*Icii*R0i.');
-                    dSi = blkdiag(zeros(3), ...
-                        dR0idq(:,:,k)*Icii*R0i.' + R0i*Icii*dR0idq(:,:,k).');
-                    
-                    % Add contribution to mass matrix derivative
-                    dMdq(:,:,k) = dMdq(:,:,k) + ...
-                        dJdq_COMi(:,:,k).' * Si * J_COMi + ...
-                        J_COMi.' * dSi * J_COMi + ...
-                        J_COMi.' * Si * dJdq_COMi(:,:,k);
+                    dSi = blkdiag(zeros(3), dR0idq(:,:,k)*Icii*R0i.' + R0i*Icii*dR0idq(:,:,k).');
+
+                    % dMdq(:,:,k) = dMdq(:,:,k) ...
+                    %               + (dJdq_COMi(:,:,k).')*[mi*eye(3), zeros(3); zeros(3), R0i*Icii*R0i.']*J_COMi ...
+                    %               + (J_COMi.')*[zeros(3), zeros(3); zeros(3), dR0idq(:,:,k)*Icii*R0i.' + R0i*Icii*dR0idq(:,:,k).']*J_COMi ...
+                    %               + (J_COMi.')*[zeros(3), zeros(3); zeros(3), R0i*Icii*R0i]*dJdq_COMi(:,:,k);
+                    dMdq(:,:,k) = dMdq(:,:,k) ...
+                                  + (dJdq_COMi(:,:,k).')*Si*J_COMi ...
+                                  + (J_COMi.')*dSi*J_COMi ...
+                                  + (J_COMi.')*Si*dJdq_COMi(:,:,k);
+
+
                 end
+
             end
-            
-            % Computing the Christoffel symbols
-            Gamma = zeros(7, 7, 7);
-            for i = 1:7
-                for j = 1:7
-                    for k = 1:7
+
+            %% Computing the Christoffel symbols
+            Gamma = zeros(7,7,7);
+            for i=1:7
+                for j=1:7
+                    for k=1:7
                         Gamma(i,j,k) = 0.5*(dMdq(k,j,i) + dMdq(k,i,j) - dMdq(i,j,k));
                     end
                 end
             end
-            
-            % Computing the Coriolis matrix
-            obj.C = zeros(7, 7);
-            for k = 1:7
-                for j = 1:7
-                    for i = 1:7
+
+            %% Computing the Coriolis matrix
+            obj.C = zeros(7,7);
+            for k=1:7
+                for j=1:7
+                    for i=1:7
                         obj.C(k,j) = obj.C(k,j) + Gamma(i,j,k)*dqdt(i);
                     end
                 end
             end
-            
-            % Test for skew symmetry (Mdot - 2C should be skew-symmetric)
-            Mdot = zeros(7, 7);
-            for k = 1:7
+
+
+            %% Testing for skew symmetry
+            Mdot = zeros(7,7);
+            for k=1:7
                 Mdot = Mdot + dMdq(:,:,k) * dqdt(k);
             end
             testMat = Mdot - 2*obj.C;
-            skew_error = norm(testMat + testMat.', 'fro');
-            
-            if skew_error > 1e-10
-                warning('Skew symmetry test failed: error = %g (should be ~0)', skew_error);
-            else
-                fprintf('Skew symmetry test passed: error = %g\n', skew_error);
-            end
+            norm(testMat + testMat.', 'fro')   % should be ~0
+
         end
-        
-        % %% Computes the coriolis matrix of the KG3
-        % function obj = CoriolisMatrix(obj, q, dqdt)
-        % 
-        %     % Updating forward kinematics
-        %     obj = obj.FKM(q);
-        %     T_all =obj.T_all;
-        % 
-        %     % Extracting the rotation matricies and their derivatives
-        %     N = length(T_all);
-        %     R_all = cell(1,N);
-        %     dR0dq_all = cell(1,N);
-        %     for i=1:N
-        %         R_all{i} = T_all{i}(1:3,1:3);
-        %         dR0dq_all{i} = obj.dTdq_all{i}(1:3,1:3,:);
-        %     end
-        % 
-        %     % Extracting the COM Jacobian derivatives
-        %     dJdq_COM = obj.dJdq_COM;
-        % 
-        %     %% Computing the mass matrix derivatives
-        %     dMdq = zeros(7,7,7);
-        %     for k=1:7
-        %         % Compute dMdq(:,:,k)
-        %         for i=1:7
-        %             % Complete each term for dMdq(:,:,k)
-        % 
-        %             dJdq_COMi = dJdq_COM{i}; % Is currently a 6x8x8, but J_COMi is 6x7
-        %             mi = obj.mArr{i};
-        %             R0i = R_all{i};
-        %             dR0idq = dR0dq_all{i};
-        %             Icii = obj.I{i};
-        %             J_COMi = obj.J_COM{i};
-        % 
-        %             Si = blkdiag(mi*eye(3), R0i*Icii*R0i.');
-        %             dSi = blkdiag(zeros(3), dR0idq(:,:,k)*Icii*R0i.' + R0i*Icii*dR0idq(:,:,k).');
-        % 
-        %             % dMdq(:,:,k) = dMdq(:,:,k) ...
-        %             %               + (dJdq_COMi(:,:,k).')*[mi*eye(3), zeros(3); zeros(3), R0i*Icii*R0i.']*J_COMi ...
-        %             %               + (J_COMi.')*[zeros(3), zeros(3); zeros(3), dR0idq(:,:,k)*Icii*R0i.' + R0i*Icii*dR0idq(:,:,k).']*J_COMi ...
-        %             %               + (J_COMi.')*[zeros(3), zeros(3); zeros(3), R0i*Icii*R0i]*dJdq_COMi(:,:,k);
-        %             dMdq(:,:,k) = dMdq(:,:,k) ...
-        %                           + (dJdq_COMi(:,:,k).')*Si*J_COMi ...
-        %                           + (J_COMi.')*dSi*J_COMi ...
-        %                           + (J_COMi.')*Si*dJdq_COMi(:,:,k);
-        % 
-        % 
-        %         end
-        % 
-        %     end
-        % 
-        %     %% Computing the Christoffel symbols
-        %     Gamma = zeros(7,7,7);
-        %     for i=1:7
-        %         for j=1:7
-        %             for k=1:7
-        %                 Gamma(i,j,k) = 0.5*(dMdq(k,j,i) + dMdq(k,i,j) - dMdq(i,j,k));
-        %             end
-        %         end
-        %     end
-        % 
-        %     %% Computing the Coriolis matrix
-        %     obj.C = zeros(7,7);
-        %     for k=1:7
-        %         for j=1:7
-        %             for i=1:7
-        %                 obj.C(k,j) = obj.C(k,j) + Gamma(i,j,k)*dqdt(i);
-        %             end
-        %         end
-        %     end
-        % 
-        % 
-        %     %% Testing for skew symmetry
-        %     Mdot = zeros(7,7);
-        %     for k=1:7
-        %         Mdot = Mdot + dMdq(:,:,k) * dqdt(k);
-        %     end
-        %     testMat = Mdot - 2*obj.C;
-        %     norm(testMat + testMat.', 'fro')   % should be ~0
-        % 
-        % end
 
     end
 
