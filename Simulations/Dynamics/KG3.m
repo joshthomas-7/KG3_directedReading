@@ -1,5 +1,15 @@
-classdef KG3
-    % TODO: ADD CLASS DESCRIPTION
+%%% Joshua Thomas
+%%% C3376353
+
+classdef KG3 < handle
+    % This class stores the kinematic and dynamic properties of the KG3.
+    % It has methods to compute the:
+    % - Forward kinematics
+    % - Inverse kinematics
+    % - Dynamic model parameters (mass matrix, coriolis matrix, gravity
+    % torque)
+    % - Implmenets motion planning
+    % - Implements motion control using inverse dynamics 
 
     properties
         %% FKM properties
@@ -7,23 +17,23 @@ classdef KG3
         T_all % all transformation matricies for the KG3 T0i (referred to base frame).
         Aij_all % local transformations between matricies
 
-        dTdq_all 
-        % dAdqi_all % cells which store the derivatives of the homogenous transformation matricies
-        % dAdq_all  % cells which store the tensors for the derivatives of the homogenous transformation matricies 
-
         pose  % pose of the KG3.
 
-        T_COM % cells which store the transformations between the COMs and the preeceding link frames.
         r_COM
 
-        AC_all
-        % dACidqi_all % cells which store the derivatives of the COM homogeneous transformation matricies
-        dACdq_all   % cells which store the tensors for the derivatives of the COM homogenous transformation matricies 
+        %% IKM Properties
+        W
+        V
+        rhoVec
+
 
         %% Differential Kinematics Properties
         J % geometric jacobian.
-        J_COM % cells which store the COM geometric Jacobians.
-        dJdq_COM
+        JA  % Analytical Jacobian
+        H   % Analytical Hessian
+
+        qdot
+        dt
         
         %% Dynamics Properties
         mArr %kg, array each stores the mass of each link in the KG3.
@@ -31,6 +41,13 @@ classdef KG3
         q     % current joint configuration
         M     % mass matrix 
         C     % Coriolis matrix
+        G     % Gravity torque
+        gravity = [0; 0; -9.81];    %m/s^2 default gravity vector 
+
+        %% Control Properties
+        KD
+        KP
+
     end
 
     methods
@@ -38,9 +55,11 @@ classdef KG3
             %KG3 Construct an instance of this class
             % Precomputes the homogenous transformations between each frame
             % of the KG3 
-            [obj.Ts, obj.mArr, obj.T_COM, obj.I, obj.r_COM] = KG3.preCompute();
+            [obj.Ts, obj.mArr, obj.I, obj.r_COM, obj.KD, obj.KP] = KG3.preCompute();
         end
-       
+
+
+        %% Kinematics
         function obj = FKM(obj, q)
             % Computes the forward kinematics of the KG3 for a given joint configuration (q)
             obj.q = q;
@@ -73,487 +92,657 @@ classdef KG3
             T_base = T_base * obj.Ts{N+1};
             obj.T_all{N+1} = T_base;
             obj.Aij_all{N+1} = obj.Ts{N+1};
-            % obj.dAdqi_all{N+1} = obj.dAdqi_all{N};
-
-
-            % % Compute full transforms to each joint
-            % obj.T_all = cell(1,N);
-            % obj.dAdqi_all = cell(1,N);
-            % T_base = eye(4);
-            % for j = 1:N
-            %     A = obj.Ts{j} * Rs{j};
-            %     T_base = T_base * A;
-            %     obj.T_all{j} = T_base;
-            % 
-            %     % Computing the derivative of each Ai-1_i transformation
-            %     obj.dAdqi_all{j} = KG3.hatSE3(xi)*A;   
-            % end
-
-            %% Computing the COM transforms
-            
-            % Creating an empty cells to store the transforms
-            obj.AC_all = cell(1,L);
-            obj.AC_all{1} = [eye(3) obj.r_COM{1};
-                             zeros(1,3) 1];
-            for i=2:L
-                % Notation:
-                % j = i-1
-                % Ci = ith COM
-                % rjCi = position of the ith COM referred to the ith i-1
-                % joint frame
-
-                rjCi = obj.r_COM{i};
-                % Extracting the transform for frame i-1 referred to the
-                % base. N.B. T_all{1} = A01
-                A0j = obj.T_all{i-1};
-
-                % Forming the transform between the joint reference frame
-                % and the ith COM
-                AjCi = [eye(3) rjCi;
-                        zeros(1,3) 1];
-                obj.AC_all{i} = A0j*AjCi;
-
-            end
-
-       
-
-            % Computing the full tensors for the transformation derivatives
-            % obj.dAdq_all = KG3.computeTensor(obj.dAdqi_all, obj.Aij_all);
-            % obj.dACdq_all = KG3.computeTensor(obj.dACidqi_all, obj.AC_all);
 
         end
-        
-        function obj = JGEO_COM(obj)
-            % Computes the COM geometric Jacobians
-            N = 7;  % number of joints
-            L = 8;  % number of links
-            obj.J_COM = cell(1,L);
 
-            for i = 1:L
-                Jci = zeros(6,N); % 6x7 Jacobian for link i
-                pCi = obj.AC_all{i}(1:3,4); % COM position in base frame
-
-                if i > 1
-                    % Only joints affecting this link
-                    for j = 1:min(i-1,N)
-                        p_j = obj.T_all{j}(1:3,4);       % joint origin
-                        z_j = obj.T_all{j}(1:3,1:3) * [0;0;1]; % joint axis in base
-                        Jv = cross(z_j, pCi - p_j);      % linear velocity part
-                        Jw = z_j;                         % angular velocity part
-                        Jci(:,j) = [Jv; Jw];
-                    end
-                end
-                % For i = 1, Jci stays all zeros
-                obj.J_COM{i} = Jci;
-            end
-        end
-
-        function obj = JGEO(obj)
-            % Computes the geometric Jacobian of the KG3 for the end-effector
-            % using z_{i-1} = axis of joint i expressed in base frame.
-        
-            pe = obj.T_all{end}(1:3,4);           % End-effector position
-            N  = numel(obj.T_all) - 1;            % number of joints
-            obj.J = zeros(6, N);
-        
-            for i = 1:N
-                if i == 1
-                    R_prev = eye(3);              % Base frame for joint 1
-                    p_prev = [0;0;0];
-                else
-                    R_prev = obj.T_all{i-1}(1:3,1:3);  % rotation base -> joint i-1
-                    p_prev = obj.T_all{i-1}(1:3,4);    % position of joint i-1
-                end
-        
-                z = R_prev * [0;0;1];              % axis of joint i in base frame
-                p_joint = p_prev;                  % origin of joint i in base frame
-        
-                Jp = cross(z, pe - p_joint);       % linear velocity part
-                Jo = z;                             % angular velocity part
-        
-                obj.J(:,i) = [Jp; Jo];
-            end
-        end
-
-        function obj = HESSIAN_GEO_COM(obj)
-            % Computes the geometric Hessian for the COM of each link
-            %
-            % Output:
-            %   obj.dJdq_COM : cell array of 6xNxN tensors (Hessians) for each COM
-
-            % Compute the transformation derivatives
-            obj = obj.compute_dT_FD(obj.q);
-            obj = obj.compute_dT_COM_FD(obj.q);
-        
-            L = length(obj.AC_all);   % number of links
-            % N = length(obj.T_all);    % number of joints
-            N = 7;
-        
-            % Precompute COM position derivatives
-            drCdq = cell(1, L);
-            for i = 1:L
-                % dACdq_all is 4x4xN tensor for each link
-                dA0Cidq = obj.dACdq_all{i};   % 4x4xN
-                drCdq{i} = squeeze(dA0Cidq(1:3,4,:)); % 3xN
-            end
-        
-            % Precompute joint z-axis and position derivatives
-            dzdq = cell(1, L);
-            dpdq = cell(1, L);
-            dzdq{1} = zeros(3, 7);
-            dpdq{1} = zeros(3, 7);
-        
-            for i = 2:L
-                dA0idq = obj.dTdq_all{i};   % 4x4xN
-                dzdq{i} = squeeze(dA0idq(1:3,3,:));  % angular derivatives
-                dpdq{i} = squeeze(dA0idq(1:3,4,:));  % linear derivatives
-            end
-        
-            % Allocate storage for Hessians
-            dJ_COM = cell(1, L);
-            dJ_COM{1} = zeros(6, N, N);
-        
-            for i = 1:L
-                rCi = obj.AC_all{i}(1:3,4);  % COM position in base frame
-                drCidq = drCdq{i};           % 3xN derivative of COM wrt q
-        
-                dJci = zeros(6, N, N);       % 6xNxN tensor for Hessian
-        
-                if i > 1
-                    for j = 1:min(i-1, N)   % joints affecting this link
-                        p_j = obj.T_all{j}(1:3,4);          % joint origin
-                        z_j = obj.T_all{j}(1:3,1:3) * [0;0;1]; % joint axis
-        
-                        dpjdq = dpdq{j};
-                        dzjdq = dzdq{j};
-        
-                        for k = 1:7
-                            % Linear part of Hessian
-                            dJv = cross(dzjdq(:,k), rCi - p_j) + ...
-                                  cross(z_j, drCidq(:,k) - dpjdq(:,k));
-        
-                            % Angular part of Hessian
-                            dJw = dzjdq(:,k);
-        
-                            % Store in tensor
-                            dJci(:, j, k) = [dJv; dJw];
-                        end
-                    end
-                end
-        
-                dJ_COM{i} = dJci;
-            end
-        
-            obj.dJdq_COM = dJ_COM;
-        end
-
-        function obj = compute_dT_FD(obj, q, eps_fd)
-            % Compute derivatives of T_all w.r.t. q using finite differences
+        function obj = computeJacobians(obj)
+            % Computes the geometric Jacobians for the KG3 manipulator
+            % Format: [linear; angular] - first 3 rows are linear, last 3 are angular
             
-            if nargin < 3
-                eps_fd = 1e-8;
-            end
-            
-            L = numel(obj.T_all);   % number of links
-            n = numel(q);           % number of joints
-            
-            % Initialize derivative tensors
-            obj.dTdq_all = cell(L, 1);
-            for i = 1:L
-                obj.dTdq_all{i} = zeros(4, 4, n);
-            end
-            
-            for k = 1:n
-                % Perturb joint k
-                qp = q; qm = q;
-                qp(k) = qp(k) + eps_fd;
-                qm(k) = qm(k) - eps_fd;
-                
-                % Create temporary objects to avoid overwriting
-                obj_temp_p = obj.copyKG3(); 
-                obj_temp_m = obj.copyKG3();
-                
-                % Create new instances and compute FKM
-                obj_temp_p = obj_temp_p.FKM(qp);
-                obj_temp_m = obj_temp_m.FKM(qm);
-                
-                Tp_all = obj_temp_p.T_all;
-                Tm_all = obj_temp_m.T_all;
-                
-                for i = 1:L
-                    % Finite difference approximation
-                    obj.dTdq_all{i}(:,:,k) = (Tp_all{i} - Tm_all{i}) / (2*eps_fd);
-                end
-            end
-        end
-        
-        function obj = compute_dT_COM_FD(obj, q, eps_fd)
-            % Compute derivatives of COM transforms w.r.t. q using finite differences
-            
-            if nargin < 3
-                eps_fd = 1e-8;
-            end
-            
-            % Ensure AC_all is computed for current q
-            obj = obj.FKM(q);
-            
-            L = numel(obj.AC_all);   % number of COM links
-            n = numel(q);            % number of joints
-            
-            % Initialize derivative tensors
-            obj.dACdq_all = cell(L, 1);
-            for i = 1:L
-                obj.dACdq_all{i} = zeros(4, 4, n);
-            end
-            
-            for k = 1:n
-                % Perturb joint k
-                qp = q; qm = q;
-                qp(k) = qp(k) + eps_fd;
-                qm(k) = qm(k) - eps_fd;
-                
-                % Create temporary objects
-                obj_temp_p = obj.copyKG3();  % Create independent copies
-                obj_temp_m = obj.copyKG3();
-                
-                % Compute forward kinematics at perturbed configurations
-                obj_temp_p = obj_temp_p.FKM(qp);
-                obj_temp_m = obj_temp_m.FKM(qm);
-                
-                Tp_all = obj_temp_p.AC_all;
-                Tm_all = obj_temp_m.AC_all;
-                
-                for i = 1:L
-                    % Finite difference approximation
-                    obj.dACdq_all{i}(:,:,k) = (Tp_all{i} - Tm_all{i}) / (2*eps_fd);
-                end
-            end
-        end
-        
-        function obj_copy = copyKG3(obj)
-            % Create a deep copy of the KG3 object
-            obj_copy = KG3();
-
-            % Copy all relevant properties
-            obj_copy.q = obj.q;
-            obj_copy.Ts = obj.Ts;
-            obj_copy.T_all = obj.T_all;
-            obj_copy.Aij_all = obj.Aij_all;
-            obj_copy.AC_all = obj.AC_all;
-            obj_copy.T_COM = obj.T_COM;
-            obj_copy.r_COM = obj.r_COM;
-            obj_copy.mArr = obj.mArr;
-            obj_copy.I = obj.I;
-            obj_copy.J = obj.J;
-            obj_copy.J_COM = obj.J_COM;
-
-            % Initialize derivative tensors
-            if ~isempty(obj.dTdq_all)
-                obj_copy.dTdq_all = obj.dTdq_all;
-            end
-            if ~isempty(obj.dACdq_all)
-                obj_copy.dACdq_all = obj.dACdq_all;
-            end
-            if ~isempty(obj.dJdq_COM)
-                obj_copy.dJdq_COM = obj.dJdq_COM;
-            end
-        end
-
-        
-        %% Computes the mass matrix of the KG3 in its current joint configuration
-        function obj = MassMatrix(obj, q)
-            N = length(q);  % 7 joints
+            N = length(obj.q);  % 7 joints
             L = length(obj.Ts); % 8 links including end-effector
             
-            % Compute the forward kinematics to update the transformation
-            % matricies
-            obj = FKM(obj,q);
-            % Use the transformation matricies to update the COM Jacobians
-            obj = JGEO_COM(obj);
+            % Initialize Jacobians
+            obj.J = zeros(6, N);           % End-effector Jacobian
             
-            % Compute the elements of the mass matrix
-            obj.M = zeros(N,N);
-            for i = 1:L
-                mi = obj.mArr{i};                  % mass
-                ICi = obj.I{i};                    % inertia in link frame
-                R0i = obj.AC_all{i}(1:3,1:3);      % rotation to base frame
-                Jci = obj.J_COM{i};                 % 6x7 Jacobian
-                Si = blkdiag(mi*eye(3), R0i*ICi*R0i.');
-                % M_link = Jci' * [mi*eye(3) zeros(3); zeros(3) R0i*ICi*R0i'] * Jci;
-                M_link = Jci.' * Si * Jci;
-                obj.M = obj.M + M_link;
+            % End-effector position
+            T_ee = obj.T_all{N+1};
+            p_ee = T_ee(1:3, 4);
+            
+            %% Compute End-effector Jacobian
+            % For each joint, compute its contribution to the end-effector motion
+            % Joint i rotates about its local z-axis in the frame where it's mounted
+            
+            for i = 1:N
+                if i == 1
+                    % Joint 1: The axis should be extracted from the T01 transformation
+                    % Joint 1 rotates about the z-axis defined by T01
+                    T_frame = obj.Ts{1};  % T01
+                    z_i = T_frame(1:3, 3);  % z-axis from T01 = [0, 0, -1]
+                    o_i = T_frame(1:3, 4);  % origin from T01
+                else
+                    % For joint i > 1, we need to find the frame where joint i is located
+                    % This is the frame after all previous joints have moved, plus Ts{i}
+                    T_accum = eye(4);
+                    for j = 1:i-1
+                        % Apply all previous joint transformations
+                        R_j = [cos(obj.q(j)) -sin(obj.q(j)) 0 0;
+                               sin(obj.q(j))  cos(obj.q(j)) 0 0;
+                               0               0            1 0;
+                               0               0            0 1];
+                        A_j = obj.Ts{j} * R_j;
+                        T_accum = T_accum * A_j;
+                    end
+                    % Add the constant part of transformation i
+                    T_frame = T_accum * obj.Ts{i};
+                    z_i = T_frame(1:3, 3);  % z-axis where joint i rotates
+                    o_i = T_frame(1:3, 4);  % origin where joint i rotates
+                end
+                
+                % Compute Jacobian column for joint i
+                % MATLAB convention: [angular; linear]
+                obj.J(1:3, i) = z_i;  % Angular velocity part
+                obj.J(4:6, i) = cross(z_i, p_ee - o_i);  % Linear velocity part
             end
+        end
+ 
+        function obj = computeAnalyticalJacobian(obj)
+            % Computes the analytical jacobian, in the current
+            % configuration
+
+            R = obj.T_all{end}(1:3,1:3);
+            eul = rotm2eul(R);
+            phi = eul(1);
+            theta = eul(2);
+            psi = eul(3);
+
+            % T for ZYZ
+            % T = [0 -sin(phi) cos(phi)*sin(theta);
+            %      0 cos(phi) sin(phi)*sin(theta);
+            %      1 0 cos(theta)];
+
+            % T for ZYX
+            T = [0 -sin(phi)  cos(phi)*cos(theta);
+                0  cos(phi)  sin(phi)*cos(theta);
+                1  0        -sin(theta)];
+            % T = [1 0 -sin(theta);
+            %      0 cos(phi) sin(phi)*cos(theta);
+            %      0 -sin(phi) cos(phi)*cos(theta)];
+
+            % Ti = inv(T);
+            TA = [eye(3) zeros(3); zeros(3) T];
+
+            % Converting the geometric jacobian to the correct form
+            Jtemp = zeros(size(obj.J));
+            Jtemp(1:3,:) = obj.J(4:6,:);
+            Jtemp(4:6,:) = obj.J(1:3,:);
+
+            obj.JA = TA\Jtemp;
+            % obj.JA = pinv(TA)*Jtemp;
+
+        end
+       
+        function obj = computeAnalyticalHessian(obj)
+            % H_{ijk} = ∂²x_i/∂q_j∂q_k = ∂(JA_ij)/∂q_k
+            
+            N = length(obj.q);  % 7 joints
+            obj.H = zeros(6, N, N);  % Initialize Hessian tensor
+            
+            epsilon = 1e-6;
+            q_orig = obj.q;
+            
+            % Store original Jacobian
+            obj = obj.computeJacobians();
+            obj = obj.computeAnalyticalJacobian();
+            JA_orig = obj.JA;
+            
+            % For each joint variable k
+            for k = 1:N
+                % Perturb joint k and compute Jacobian
+                q_plus = q_orig;
+                q_plus(k) = q_plus(k) + epsilon;
+                obj = obj.FKM(q_plus);
+                obj = obj.computeJacobians();
+                obj = obj.computeAnalyticalJacobian();
+                JA_plus = obj.JA;
+                
+                q_minus = q_orig;
+                q_minus(k) = q_minus(k) - epsilon;
+                obj = obj.FKM(q_minus);
+                obj = obj.computeJacobians();
+                obj = obj.computeAnalyticalJacobian();
+                JA_minus = obj.JA;
+                
+                % Compute derivative of Jacobian wrt q_k
+                dJA_dqk = (JA_plus - JA_minus) / (2 * epsilon);
+                
+                % Store in Hessian tensor
+                obj.H(:, :, k) = dJA_dqk;
+            end
+            
+            % Restore original configuration
+            obj = obj.FKM(q_orig);
+            obj = obj.computeJacobians();
+            obj = obj.computeAnalyticalJacobian();
+        end
+
+        function ddx = computePoseAcceleration(obj, qdot, qddot)
+            % Computes pose acceleration using analytical Jacobian and Hessian
+            % ddx = JA * qddot + Σ_j Σ_k H(:,j,k) * qdot(j) * qdot(k)
+            
+            N = length(obj.q);
+            
+            % First term: JA * qddot
+            ddx_linear = obj.JA * qddot;
+            
+            % Second term: quadratic velocity term using Hessian
+            ddx_quadratic = zeros(6, 1);
+            for i = 1:6
+                for j = 1:N
+                    for k = 1:N
+                        ddx_quadratic(i) = ddx_quadratic(i) + obj.H(i, j, k) * qdot(j) * qdot(k);
+                    end
+                end
+            end
+            
+            ddx = ddx_linear + ddx_quadratic;
+        end
+
+        function cost = IKMCost(obj, sigma, sigma0, qdot0)
+            q = sigma(1:7);
+            s = sigma(8:end);
+            % sp = sigma(1:6);
+            % sv = sigma(7:12);
+            q0 = sigma0(1:7);
+            W = obj.W;
+            rhoVec = obj.rhoVec;
+
+            qdot = (q - q0)/obj.dt;
+            V = obj.V;
+        
+            cost = (q-q0).'*W*(q-q0) + (qdot-qdot0).'*V*(qdot-qdot0) +  rhoVec.'*s;
+        end
+
+        function [cineq, ceq] = IKMConstraints(obj, sigma, sigma0, pose_des, poseVel_des, firstTime)
+            q = sigma(1:7);
+            s = sigma(8:end);
+            sp = s(1:6);
+            sv = s(7:12);
+            
+            % Extracting the previous joint configuration, for joint
+            % velocity calculations
+            q0 = sigma0(1:7);
+            qdot = (q - q0)/obj.dt;
+
+            obj = obj.FKM(q);
+            p = obj.T_all{end}(1:3,4);
+            R = obj.T_all{end}(1:3,1:3);
+
+            eul = rotm2eul(R);
+            
+            pose = [p;eul.'];
+            % pose_des = [p_des;eul_des];
+        
+            % Equality constraints
+            ceq = [];
+        
+            % Pose inequality constraints
+            c_upper = pose - sp - pose_des;
+            c_lower = -pose - sp + pose_des;
+
+        
+            % Inequality constraint Jacobian
+            phi = eul(1);
+            theta = eul(2);
+            
+            % Computing the analytical jacobian at the current
+            % configuration
+            obj = obj.computeJacobians();
+            obj = obj.computeAnalyticalJacobian();
+            JA = obj.JA;
+            % JA(isnan(JA)) = 0;
+
+            cv_upper = JA*qdot - sv - poseVel_des;
+            cv_lower = -JA*qdot - sv + poseVel_des;
+
+            if ~firstTime
+                cineq = [c_upper;c_lower;cv_upper;cv_lower];
+            else
+                cineq = [c_upper;c_lower];
+            end
+
+            % cineq = [c_upper;c_lower];
+
+        end
+        
+        %% Dynamics
+
+        function obj = computeMassMatrix(obj)
+            % Computes the mass matrix
+            % M(q) = Σᵢ [mᵢJᵥᵢᵀJᵥᵢ + JωᵢᵀRᵢIᵢRᵢᵀJωᵢ]
+
+            N = length(obj.q);  % 7 joints
+            L = length(obj.Ts); % 8 links including end-effector
+
+            % Initialize mass matrix
+            obj.M = zeros(N, N);
+
+            % For each link (including end-effector), compute its contribution
+            for i = 1:L
+
+                % Get mass and inertia tensor for link i
+                mi = obj.mArr{i};
+                Ii = obj.I{i};  % Inertia tensor about COM
+
+                % Compute transformation to link i's COM
+                T_COM_i = obj.computeCOMTransform(i);
+
+                % Extract rotation matrix and COM position
+                R_i = T_COM_i(1:3, 1:3);  % Rotation from base to link i COM frame
+                r_COM_i = T_COM_i(1:3, 4); % COM position in base frame
+
+                % Compute Jacobians for link i's COM
+                [Jv_i, Jw_i] = obj.computeLinkJacobians(i, r_COM_i);
+
+                % Add contribution to mass matrix
+                % Linear contribution: mᵢJᵥᵢᵀJᵥᵢ
+                obj.M = obj.M + mi * (Jv_i' * Jv_i);
+
+                % Angular contribution: JωᵢᵀRᵢIᵢRᵢᵀJωᵢ
+                % Transform inertia tensor to base frame: R_i * I_i * R_i'
+                I_base = R_i * Ii * R_i';
+                obj.M = obj.M + Jw_i' * I_base * Jw_i;
+            end
+        end
+
+        % function T_COM = computeCOMTransform(obj, link_idx)
+        %     % Computes transformation matrix from base frame to COM of link_idx
+        %     % COM is defined in the frame of joint (link_idx-1) per Kinova manual
+        % 
+        %     N = length(obj.q);
+        % 
+        %     if link_idx == 1
+        %         % Base link COM - defined in base frame
+        %         T_COM = [eye(3) obj.r_COM{1}; 0 0 0 1];
+        % 
+        %     elseif link_idx <= N
+        %         % Joint link COM: accumulate transformations up to joint (link_idx-1)
+        %         T_accum = eye(4);
+        %         for j = 1:(link_idx-1)
+        %             R_j = [cos(obj.q(j)) -sin(obj.q(j)) 0 0;
+        %                    sin(obj.q(j))  cos(obj.q(j)) 0 0;
+        %                    0               0            1 0;
+        %                    0               0            0 1];
+        %             A_j = obj.Ts{j} * R_j;
+        %             T_accum = T_accum * A_j;
+        %         end
+        % 
+        %         % Transform COM from joint (link_idx-1) frame to base frame
+        %         r_COM_local = [obj.r_COM{link_idx}; 1];
+        %         r_COM_base = T_accum * r_COM_local;
+        %         T_COM = [T_accum(1:3,1:3) r_COM_base(1:3); 0 0 0 1];
+        % 
+        %     else
+        %         % End-effector (link 8): COM defined in Joint 7's frame
+        %         % So use T_all{7} (base to joint 7) + COM offset
+        %         T_accum = obj.T_all{N};  % Base to Joint 7
+        %         r_COM_local = [obj.r_COM{link_idx}; 1];
+        %         r_COM_base = T_accum * r_COM_local;
+        %         T_COM = [T_accum(1:3,1:3) r_COM_base(1:3); 0 0 0 1];
+        %     end
+        % end
+        % 
+
+
+        function T_COM = computeCOMTransform(obj, link_idx)
+            % Computes transformation matrix from base frame to COM of link_idx
+
+            N = length(obj.q);
+
+            if link_idx == 1
+                % Base link COM - just the COM offset from base
+                T_COM = [eye(3) obj.r_COM{1}; 0 0 0 1];
+            else
+                % Add COM offset for this link
+                T_accum = obj.T_all{link_idx-1};
+                T_COM_offset = [eye(3) obj.r_COM{link_idx}; 0 0 0 1];
+                T_COM = T_accum * T_COM_offset;
+            end
+        end
+
+        function [Jv, Jw] = computeLinkJacobians(obj, link_idx, r_COM)
+            % Computes linear (Jv) and angular (Jw) Jacobians for link_idx COM
+
+            N = length(obj.q);
+            Jv = zeros(3, N);  % Linear velocity Jacobian
+            Jw = zeros(3, N);  % Angular velocity Jacobian
+
+            % Determine which joints affect this link
+            if link_idx == 1
+                % Base link is not affected by any joint motion
+                return;  % Jacobians remain zero
+            % elseif link_idx <= N
+            %     % Joint link i is affected by joints 1 to (i-1)
+            %     affected_joints = 1:(link_idx-1);
+            % else
+            %     % End-effector is affected by all joints
+            %     affected_joints = 1:N;
+            % end
+            else
+                affected_joints = 1:(link_idx-1);
+            end
+
+            
+
+            % For each joint that affects this link
+            for j = affected_joints
+
+                % Get the axis and origin of joint j
+                % [z_j, o_j] = obj.getJointAxisAndOrigin(j);
+                T0j = obj.T_all{j};
+                z_j = T0j(1:3,3);
+                o_j = T0j(1:3,4);
+
+
+                % Angular velocity contribution (same for all points on the link)
+                Jw(:, j) = z_j;
+
+                % Linear velocity contribution
+                Jv(:, j) = cross(z_j, r_COM - o_j);
+            end
+        end
+
+        function [z_axis, origin] = getJointAxisAndOrigin(obj, joint_idx)
+            % Returns the axis of rotation and origin for joint_idx in base frame
+            T_frame = obj.T_all{joint_idx};
+            z_axis = T_frame(1:3,3);
+            origin = T_frame(1:3,4);
 
         end
 
-        function obj = CoriolisMatrix(obj, q, dqdt)
-            % Computes the coriolis matrix of the KG3
+        function obj = computeCoriolisMatrix(obj, qdot)
+            % Computes the Coriolis matrix C(q,qdot) using Christoffel symbols
+            % C_ij = Σₖ c_ijk * qdot_k
+            % where c_ijk = 1/2 * [∂M_ij/∂q_k + ∂M_ik/∂q_j - ∂M_jk/∂q_i]
             
-            % Update forward kinematics and derivatives
-            obj = obj.FKM(q);
-            obj = obj.JGEO_COM();
             
-            % Initialize derivative tensors if not already computed
-            if isempty(obj.dTdq_all)
-                obj.dTdq_all = cell(1, length(obj.T_all));
-                for i = 1:length(obj.T_all)
-                    obj.dTdq_all{i} = zeros(4, 4, 7);
-                end
-            end
+            N = length(obj.q);
+            obj.C = zeros(N, N);
             
-            if isempty(obj.dACdq_all)
-                obj.dACdq_all = cell(1, length(obj.AC_all));
-                for i = 1:length(obj.AC_all)
-                    obj.dACdq_all{i} = zeros(4, 4, 7);
-                end
-            end
+            % Compute partial derivatives of mass matrix numerically
+            dM_dq = obj.computeMassMatrixDerivatives();
             
-            % Compute transformation derivatives using finite differences
-            obj = obj.compute_dT_FD(q);
-            obj = obj.compute_dT_COM_FD(q);
-            
-            % Compute Jacobian derivatives (Hessian)
-            obj = obj.HESSIAN_GEO_COM();
-            
-            % Extract rotation matrices and their derivatives
-            N = length(obj.T_all);
-            R_all = cell(1, N);
-            dR0dq_all = cell(1, N);
+            % Compute Christoffel symbols and Coriolis matrix
             for i = 1:N
-                R_all{i} = obj.T_all{i}(1:3, 1:3);
-                if ~isempty(obj.dTdq_all{i})
-                    dR0dq_all{i} = obj.dTdq_all{i}(1:3, 1:3, :);
-                else
-                    dR0dq_all{i} = zeros(3, 3, 7);
-                end
-            end
-            
-            % Computing the mass matrix derivatives
-            L = length(obj.AC_all);
-            dMdq = zeros(7, 7, 7);
-            
-            for k = 1:7
-                for i = 1:L
-                    dJdq_COMi = obj.dJdq_COM{i}; % Should be 6x7x7
-                    mi = obj.mArr{i};
-                    
-                    % Handle rotation matrix derivatives safely
-                    if i <= length(R_all) && i <= length(dR0dq_all)
-                        R0i = R_all{i};
-                        dR0idq = dR0dq_all{i};
-                    else
-                        % For end-effector or if missing, use identity
-                        R0i = eye(3);
-                        dR0idq = zeros(3, 3, 7);
-                    end
-                    
-                    Icii = obj.I{i};
-                    J_COMi = obj.J_COM{i}; % Should be 6x7
-                    
-                    % Check dimensions
-                    if size(dJdq_COMi, 2) ~= 7 || size(dJdq_COMi, 3) ~= 7
-                        warning('Dimension mismatch in dJdq_COM{%d}: expected 6x7x7, got %s', ...
-                            i, mat2str(size(dJdq_COMi)));
-                        continue;
-                    end
-                    
-                    % Compute inertia matrices
-                    Si = blkdiag(mi*eye(3), R0i*Icii*R0i.');
-                    dSi = blkdiag(zeros(3), ...
-                        dR0idq(:,:,k)*Icii*R0i.' + R0i*Icii*dR0idq(:,:,k).');
-                    
-                    % Add contribution to mass matrix derivative
-                    dMdq(:,:,k) = dMdq(:,:,k) + ...
-                        dJdq_COMi(:,:,k).' * Si * J_COMi + ...
-                        J_COMi.' * dSi * J_COMi + ...
-                        J_COMi.' * Si * dJdq_COMi(:,:,k);
-                end
-            end
-            
-            % Computing the Christoffel symbols
-            Gamma = zeros(7, 7, 7);
-            for i = 1:7
-                for j = 1:7
-                    for k = 1:7
-                        Gamma(i,j,k) = 0.5*(dMdq(k,j,i) + dMdq(k,i,j) - dMdq(i,j,k));
+                for j = 1:N
+                    for k = 1:N
+                        % Christoffel symbol c_ijk
+                        c_ijk = 0.5 * (dM_dq(i,j,k) + dM_dq(i,k,j) - dM_dq(j,k,i));
+                        
+                        % Add contribution to Coriolis matrix
+                        obj.C(i,j) = obj.C(i,j) + c_ijk * qdot(k);
                     end
                 end
-            end
-            
-            % Computing the Coriolis matrix
-            obj.C = zeros(7, 7);
-            for k = 1:7
-                for j = 1:7
-                    for i = 1:7
-                        obj.C(k,j) = obj.C(k,j) + Gamma(i,j,k)*dqdt(i);
-                    end
-                end
-            end
-            
-            % Test for skew symmetry (Mdot - 2C should be skew-symmetric)
-            Mdot = zeros(7, 7);
-            for k = 1:7
-                Mdot = Mdot + dMdq(:,:,k) * dqdt(k);
-            end
-            testMat = Mdot - 2*obj.C;
-            skew_error = norm(testMat + testMat.', 'fro');
-            
-            if skew_error > 1e-10
-                warning('Skew symmetry test failed: error = %g (should be ~0)', skew_error);
-            else
-                fprintf('Skew symmetry test passed: error = %g\n', skew_error);
             end
         end
         
-    end
+        function dM_dq = computeMassMatrixDerivatives(obj)
+            % Computes partial derivatives of mass matrix ∂M/∂q numerically
+            % Returns 3D array: dM_dq(i,j,k) = ∂M_ij/∂q_k
+            
+            N = length(obj.q);
+            dM_dq = zeros(N, N, N);
+            
+            % Small perturbation for numerical differentiation
+            % epsilon = 1e-6;
+            
+            
+            % Store original configuration and mass matrix
+            q_orig = obj.q;
+            M_orig = obj.M;
+            
+            % Compute derivatives for each joint variable
+            for k = 1:N
+                epsilon = max(1e-6, 1e-4 * abs(obj.q(k))); % Scale with joint angle
+                % Forward perturbation
+                q_plus = q_orig;
+                q_plus(k) = q_plus(k) + epsilon;
+                obj = obj.FKM(q_plus);
+                obj = obj.computeMassMatrix();
+                M_plus = obj.M;
+                
+                % Backward perturbation  
+                q_minus = q_orig;
+                q_minus(k) = q_minus(k) - epsilon;
+                obj = obj.FKM(q_minus);
+                obj = obj.computeMassMatrix();
+                M_minus = obj.M;
+                
+                % Central difference approximation
+                dM_dq(:,:,k) = (M_plus - M_minus) / (2 * epsilon);
+            end
+            
+            % Restore original configuration
+            obj = obj.FKM(q_orig);
+            obj.M = M_orig;
+        end
+
+        function obj = computeGravityTorque(obj)
+            N = length(obj.q);
+            L = length(obj.Ts);
+
+            obj.G = zeros(N, 1);
+
+
+            % For each joint i
+            for i = 1:N
+                % Get joint axis and origin in base frame
+                [z_i, o_i] = obj.getJointAxisAndOrigin(i);
+
+                % Sum contributions from links that are kinematically affected by joint i
+                for j = 1:L  % Skip base link (j=1)
+                    % Check if link j is affected by joint i
+                    link_affected = (i < j);
+
+                    if ~link_affected
+                        continue;
+                    end
+
+                    % Get current COM position in base frame
+                    T_COM_j = obj.computeCOMTransform(j);
+                    r_COM_j = T_COM_j(1:3, 4);
+
+                    % Analytical derivative using twist: dr/dq = z × (r - o)
+                    dr_COM_dqi = cross(z_i, r_COM_j - o_i);
+
+
+                    % Add gravity contribution
+                    mj = obj.mArr{j};
+                    contribution = -mj * (obj.gravity' * dr_COM_dqi);
+                    obj.G(i) = obj.G(i) + contribution;
+
+                end
+
+            end
+        end
+
+        % 
+        % function obj = computeGravityTorque(obj)
+        %     % Computes gravity torque using geometric Jacobians
+        %     % G_i = -∑_j m_j * J_v_j^T * g
+        %     % where J_v_j is the linear velocity Jacobian for link j's COM
+        % 
+        %     N = length(obj.q);
+        %     L = length(obj.Ts);
+        %     obj.G = zeros(N, 1);
+        % 
+        %     % For each link (skip base link which doesn't move)
+        %     for j = 2:L
+        %         % Get link mass
+        %         m_j = obj.mArr{j};
+        % 
+        %         % Get COM position in base frame
+        %         T_COM = obj.computeCOMTransform(j);
+        %         r_COM = T_COM(1:3, 4);
+        % 
+        %         % Compute Jacobian for this COM
+        %         [J_v, J_w] = obj.computeLinkJacobians(j, r_COM);
+        %         Jcj = [J_v;J_w];
+        % 
+        %         % % Determine which joints affect this link
+        %         % for i = 1:N
+        %         %     % if j <= N
+        %         %     %     affects_link = (i < j); 
+        %         %     % else
+        %         %     %     affects_link = (i <= N); % End-effector affected by all joints
+        %         %     % end
+        %         %     affects_link = i < j;
+        %         % 
+        %         %     if affects_link
+        %         %         % Get joint i axis and origin
+        %         %         [z_i, o_i] = obj.getJointAxisAndOrigin(i);
+        %         % 
+        %         %         % Linear velocity Jacobian column: J_v = z_i × (r_COM - o_i)
+        %         %         J_v(:, i) = cross(z_i, r_COM - o_i);
+        %         %     end
+        %         % end
+        % 
+        %         % Add this link's contribution to gravity torque
+        %         Fcj = m_j*obj.gravity;
+        %         tau_j = [Fcj;zeros(3,1)];
+        % 
+        %         obj.G = obj.G - (Jcj.')*tau_j;
+        %         % obj.G = obj.G - m_j * (J_v' * obj.gravity);
+        %     end
+        % end
+        % 
+        % 
+        function affected = linkAffectedByJoint(obj, link_idx, joint_idx)
+            % Determines if link_idx is affected by joint_idx motion
+            
+            if link_idx == 1
+                % Base link is never affected by joint motion
+                affected = false;
+            elseif link_idx <= length(obj.q)
+                % Joint link i is affected by joints 1 to (i-1)
+                affected = (joint_idx < link_idx);
+            else
+                % End-effector is affected by all joints
+                affected = (joint_idx <= length(obj.q));
+            end
+        end
+
+        %% Control
+        function u = inverseDynamicsControl(obj, QD, Q, M, vProduct, G)
+
+            % Update the dynamics based on the joint configuration
+            qdot = Q(:,2);
+            obj = obj.FKM(Q(:,1));
+            obj = obj.computeJacobians();
+            obj = obj.computeMassMatrix();
+            obj = obj.computeCoriolisMatrix(qdot);
+            obj = obj.computeGravityTorque();
+            obj = obj.computeAnalyticalJacobian();
+
+            y = obj.NLSF(QD, Q);
+
+            % Apply the control law
+            n = obj.C*qdot + obj.G;
+            u = obj.M*y + n;
+
+            % % Applying the control law using matlab's parameters
+            % n = vProduct + G;
+            % u = M*y + n;
+            
+
+
+            obj.G
+            G
+            
+        end
+
+        function y = NLSF(obj, QD, Q)
+            % Change to controlling in joint space for now
+            KD = obj.KD;
+            KP = obj.KP;
+            
+            qD = QD(:,1);
+            qDdot = QD(:,2);
+            qDddot = QD(:,3);
+
+            q = Q(:,1);
+            qdot = Q(:,2);
+            qddot = Q(:,3);
+
+            r = qDddot + KD*qDdot + KP*qD;
+            y = -KP*q - KD*qdot + r;
+
+            % E = Qd - Q;
+            % e = E(1);
+            % edot = E(2);
+            % eddot = E(3);
+
+            % y = pinv(myKG3.JA)*(eddot + KD*edot + KP*e - )
+
+        end
+
+        function S = skew(v)
+            % Creates skew-symmetric matrix from 3D vector
+            S = [0    -v(3)  v(2);
+                 v(3)  0    -v(1);
+                 -v(2) v(1)  0   ];
+        end
+
+    end 
 
     methods (Static)
-        function [Ts, mArr, TC, I, rC] = preCompute()
+
+        function [Ts, mArr, I, rC, KD, KP] = preCompute()
             % Creating the coordinate transformations
             Ts = {};
-            
+
             T01 = [1 0 0 0;
                    0 -1 0 0;
                    0 0 -1 0.1564;
                    0 0 0 1];
             Ts{1} = T01;
-            
+
             T12 = [1 0 0 0;
                    0 0 -1 0.0054;
                    0 1 0 -0.1284;
                    0 0 0 1];
             Ts{2} = T12;
-            
+
             T23 = [1 0 0 0;
                 0 0 1 -0.2104;
                 0 -1 0 -0.00640;
                 0 0 0 1];
             Ts{3} = T23;
-            
+
             T34 = [1 0 0 0;
                 0 0 -1 0.0064;
                 0 1 0 -0.2104;
                 0 0 0 1];
             Ts{4} = T34;
-            
+
             T45 = [1 0 0 0;
                 0 0 1 -0.2084;
                 0 -1 0 -0.0064;
                 0 0 0 1];
             Ts{5} = T45;
-            
+
             T56 = [1 0 0 0;
                 0 0 -1 0;
                 0 1 0 -0.1059;
                 0 0 0 1];
             Ts{6} = T56;
-            
+
             T67 = [1 0 0 0;
                 0 0 1 -0.1059;
                 0 -1 0 0;
                 0 0 0 1];
             Ts{7} = T67;
-            
+
             T78 = [1 0 0 0;
                    0 -1 0 0;
                    0 0 -1 -0.0615;
@@ -561,111 +750,239 @@ classdef KG3
             Ts{8} = T78;
 
             %% Initialising properties required for dynamics simulation
-            % Defining the mass of each link   %vision module = 0.500
-            % mArr = {1.697, 1.377, 1.1636, 1.1636, 0.930, 0.678, 0.678, 0.364}; % no vision module
+            % Using Kinova Gen3 manual parameters
+            % Structure: {Base, Link1, Link2, Link3, Link4, Link5, Link6, Link7+EndEffector}
+            % mArr = {1.667, 1.3773, 1.1636, 1.1636, 0.9302, 0.6781, 0.6781, 0.500}; % with vision module
+            % mArr = {0, 1.3773, 1.1636, 1.1636, 0.9302, 0.6781, 0.6781, 0.500}; % with vision module
+            % 
+            % % Defining the centre of mass position vectors
+            % % Note: Base COM is in base frame, other COMs are in preceding joint frame
+            % rC = {};
+            % % rC{1} = [-0.000648; -0.000166; 0.084487];   % Base (Table 75)
+            % rC{1} = [0; 0; 0];   % Base (Table 75)
+            % rC{2} = [-2.3000e-05; -0.0104; -0.0734]; % Link 1 (Table 76)  
+            % % rC{2} = [2.3000e-05; 0.0104; 0.0734]; % Link 1 (Table 76)  
+            % rC{3} = [-4.4000e-05; -0.0996; -0.0133]; % Link 2 (Table 77)
+            % rC{4} = [-4.4000e-05; -0.0066; -0.1179]; % Link 3 (Table 78)
+            % rC{5} = [-1.8000e-05; -0.0755; -0.0150]; % Link 4 (Table 79)
+            % rC{6} = [1.0000e-06; -0.0094; -0.0639];  % Link 5 (Table 80)
+            % rC{7} = [1.0000e-06; -0.0455; -0.0097];  % Link 6 (Table 81)
+            % rC{8} = [2.8100e-04; 0.0114; -0.0298]; % Interface module with vision (Table 83)
+            % 
+            % % Defining the inertia tensors for each link (exact manual values)
+            % % Manual format: [Ixx, Ixy, Ixz, Iyy, Iyz, Izz] -> Convert to 3x3 matrix
+            % I_vecs = [
+            %     % Base (Table 75)
+            %     0.004622 0.000009 0.000060 0.004495 0.000009 0.002079;
+            %     % Link 1 (Table 76) 
+            %     0.004570 0.000001 0.000002 0.004831 0.000448 0.001409;
+            %     % Link 2 (Table 77)
+            %     0.011088 0.000005 0.000000 0.001072 -0.000691 0.011255;
+            %     % Link 3 (Table 78)
+            %     0.010932 0.000000 -0.000007 0.011127 0.000606 0.001043;
+            %     % Link 4 (Table 79)
+            %     0.008147 -0.000001 0.000000 0.000631 -0.000500 0.008316;
+            %     % Link 5 (Table 80)
+            %     0.001596 0.000000 0.000000 0.001607 0.000256 0.000399;
+            %     % Link 6 (Table 81)
+            %     0.001641 0.000000 0.000000 0.000410 -0.000278 0.001641;
+            %     % Interface module with vision (Table 83)
+            %     0.000587 0.000003 0.000003 0.000369 0.000118 0.000609
+            % ];
+
             mArr = {1.697, 1.377, 1.1636, 1.1636, 0.930, 0.678, 0.678, 0.500}; % with vision module
+            % mArr = {1.697, 1.377, 1.1636, 1.1636, 0.930, 0.678, 0.678, 1.425}; % includes gripper module
 
-            % Defining the centre of mass position vectors (pCi = pi + rCi)
+            % Defining the centre of mass position vectors
+            % Note: Base COM is in base frame, other COMs are in preceding joint frame
             rC = {};
-            rC{1} = [-0.000648;-0.000166;0.084487];
-            rC{2} = [-0.000023; -0.010364; -0.073360];
-            rC{3} = [-0.000044; -0.099580; -0.013278];
-            rC{4} = [-0.000044; -0.006641; -0.117892];
-            rC{5} = [-0.000018; -0.075478; -0.015006];
-            rC{6} = [0.000001; -0.009432; -0.063883];
-            rC{7} = [0.000001; -0.045483; -0.009650];
-            % rC{8} = [-0.000093; 0.000132; -0.022905]; % interface module without vision module
-            rC{8} = [-0.000281; -0.011402; -0.029798];  % interface module with vision module
+            % rC{1} = [0; 0; 0];   % Base (Table 75)
+            % rC{2} = [-0.000023; -0.010364; -0.073360]; % Link 1 (Table 76)  
+            % rC{3} = [-0.000044; -0.099580; -0.013278]; % Link 2 (Table 77)
+            % rC{4} = [-0.000044; -0.006641; -0.117892]; % Link 3 (Table 78)
+            % rC{5} = [-0.000018; -0.075478; -0.015006]; % Link 4 (Table 79)
+            % rC{6} = [0.000001; -0.009432; -0.063883];  % Link 5 (Table 80)
+            % rC{7} = [0.000001; -0.045483; -0.009650];  % Link 6 (Table 81)
+            % rC{8} = [0.000281; 0.011402; -0.029798]; % Interface module with vision (Table 83)
+            % rC{8} = [-0.000281; -0.011402; -0.077098]; % Interface module with vision (Table 83)
 
-            TC = {};
+            rC{1} = [0; 0; 0];   % Base (Table 75)
+            rC{2} = [-0.000023; -0.010364; -0.073360]; % Link 1 (Table 76)  
+            rC{3} = [-0.000044; -0.099580; 0.013278]; % Link 2 (Table 77)
+            rC{4} = [-0.000044; -0.006641; -0.117892]; % Link 3 (Table 78)
+            rC{5} = [-0.000018; -0.075478; -0.015006]; % Link 4 (Table 79)
+            rC{6} = [0.000001; -0.009032; -0.063883];  % Link 5 (Table 80)
+            rC{7} = [0.000001; -0.045483; -0.009650];  % Link 6 (Table 81)
+            rC{8} = [0.000281; 0.011402; -0.029798]; % Interface module with vision (Table 83)
 
-            for i=1:8
-                TC{i} = [eye(3,3) rC{i};
-                         zeros(1,3) 1];
-            end
+            % Defining the inertia tensors for each link (exact manual values)
+            % Manual format: [Ixx, Ixy, Ixz, Iyy, Iyz, Izz] -> Convert to 3x3 matrix
+            % I_vecs = [
+            %     % Base (Table 75)
+            %     0.004622 0.000009 0.000060 0.004495 0.000009 0.002079;
+            %     % Link 1 (Table 76) 
+            %     0.004570 0.000001 0.000002 0.004831 0.000448 0.001409;
+            %     % Link 2 (Table 77)
+            %     0.011088 0.000005 0.000000 0.001072 -0.000691 0.011255;
+            %     % Link 3 (Table 78)
+            %     0.010932 0.000000 -0.000007 0.011127 0.000606 0.001043;
+            %     % Link 4 (Table 79)
+            %     0.008147 -0.000001 0.000000 0.000631 -0.000500 0.008316;
+            %     % Link 5 (Table 80)
+            %     0.001596 0.000000 0.000000 0.001607 0.000256 0.000399;
+            %     % Link 6 (Table 81)
+            %     0.001641 0.000000 0.000000 0.000410 -0.000278 0.001641;
+            %     % Interface module with vision (Table 83)
+            %     0.000587 0.000003 0.000003 0.000369 0.000118 0.000609
+            %     % 0.000692 0.000003 0.000003 0.000542 0.000118 0.0001599  %gripper module
+            % ];
 
+            I_vecs = [
+                % Base (Table 75)
+                0.004622 0.000009 0.000060 0.004495 0.000009 0.002079;
+                % Link 1 (Table 76) 
+                0.0121 0.0122 0.0016 -5.9917e-04 -3.2389e-07 6.7169e-07;
+                % Link 2 (Table 77)
+                0.0228 0.0013 0.0228 -0.0022 -6.7981e-07 -9.8337e-08;
+                % Link 3 (Table 78)
+                0.0272 0.0273 0.0011 -3.0501e-04 -1.3036e-05 -3.4001e-07;
+                % Link 4 (Table 79)
+                0.0137 8.4046e-04 0.0136 -0.0016 -2.5125e-07 -2.2638e-06;
+                % Link 5 (Table 80)
+                0.0044 0.0044 4.5933e-04 -1.5259e-04 4.3319e-08 6.3958e-09;
+                % Link 6 (Table 81)
+                0.0031 4.7315e-04 0.0030 -5.7563e-04 6.5437e-09 3.0842e-08;
+                % Interface module with vision (Table 83)
+                0.0011 8.1300e-04 6.7404e-04 5.1878e-05 7.1866e-06 1.3980e-06
+                % 0.000692 0.000003 0.000003 0.000542 0.000118 0.0001599  %gripper module
+            ];
 
-            
-            % Defining the inertia tensors for each link
-            % Ii = [Ixx Ixy Ixz Iyy Iyz Izz]
-            % I_vecs = [I0;I2;...I7]
-            % I_vecs = [0.004622 0.000009 0.000060 0.004495 0.000009 0.002079;
-            %           0.004570 0.000001 0.000002 0.004831 0.000448 0.001409;
-            %           0.011088 0.000005 0.000000 0.001072 -0.000691 0.011255;
-            %           0.010932 0.000000 -0.000007 0.011127 0.000606 0.001043;
-            %           0.008147 -0.000001 0.000000 0.000631 -0.000500 0.008316;
-            %           0.001596 0.000000 0.000000 0.001607 0.000256 0.000399;
-            %           0.001641 0.000000 0.000000 0.000410 -0.000278 0.001641;
-            %           0.000214 0.000000 0.000001 0.000223 -0.000002 0.000240];  % without vision module
-
-
-            I_vecs = [0.004622 0.000009 0.000060 0.004495 0.000009 0.002079;
-                      0.004570 0.000001 0.000002 0.004831 0.000448 0.001409;
-                      0.011088 0.000005 0.000000 0.001072 -0.000691 0.011255;
-                      0.010932 0.000000 -0.000007 0.011127 0.000606 0.001043;
-                      0.008147 -0.000001 0.000000 0.000631 -0.000500 0.008316;
-                      0.001596 0.000000 0.000000 0.001607 0.000256 0.000399;
-                      0.001641 0.000000 0.000000 0.000410 -0.000278 0.001641;
-                      0.000587 0.000003 0.000003 0.000369 0.000118 0.000609]; % with vision module
-            
-            % Looping through each Ivec to generate the inertia tensors
+                        % Convert inertia vectors to 3x3 matrices
             I = {};
             n = length(I_vecs);
             for i=1:n
-                % Extracting the intertia vector and its parameters
+                % Extract inertia vector components
                 Ii = I_vecs(i,:);
                 Ixx = Ii(1);
-                Ixy = Ii(2);
-                Ixz = Ii(3);
-                Iyy = Ii(4);
-                Iyz = Ii(5);
-                Izz = Ii(6);
-                
-                % Forming the inertia tensor for link i
+                Iyy = Ii(2);  % Manual: Ixy is 2nd element
+                Izz = Ii(3);  % Manual: Ixz is 3rd element  
+                Iyz = Ii(4);  % Manual: Iyy is 4th element
+                Ixz = Ii(5);  % Manual: Iyz is 5th element
+                Ixy = Ii(6);  % Manual: Izz is 6th element
+                % Ixy = 0;
+                % Ixz = 0;
+                % Iyz = 0;
+
+                % Form symmetric inertia tensor
                 I{i} = [Ixx Ixy Ixz;
                         Ixy Iyy Iyz;
                         Ixz Iyz Izz];
             end
+            
+
+            % % Convert inertia vectors to 3x3 matrices
+            % I = {};
+            % n = length(I_vecs);
+            % for i=1:n
+            %     % Extract inertia vector components
+            %     Ii = I_vecs(i,:);
+            %     Ixx = Ii(1);
+            %     Ixy = Ii(2);  % Manual: Ixy is 2nd element
+            %     Ixz = Ii(3);  % Manual: Ixz is 3rd element  
+            %     Iyy = Ii(4);  % Manual: Iyy is 4th element
+            %     Iyz = Ii(5);  % Manual: Iyz is 5th element
+            %     Izz = Ii(6);  % Manual: Izz is 6th element
+            %     % Ixy = 0;
+            %     % Ixz = 0;
+            %     % Iyz = 0;
+            % 
+            %     % Form symmetric inertia tensor
+            %     I{i} = [Ixx Ixy Ixz;
+            %             Ixy Iyy Iyz;
+            %             Ixz Iyz Izz];
+            % end
+
+            % KP = 8*eye(7,7);
+            L = [8,8,8,8,8,8,8];
+            % L = 8*ones(1,7);
+            KP = diag(L);
+            KD = diag(1.5*L);
+            % KD = 2*8*eye(7,7);
+
 
         end
 
-        function G = hatSE3(xi)
-            % Computes the generating matrix for SE3 for a given twist vector
-            G = [KG3.skew(xi(4:6)) xi(1:3); zeros(1,4)];
-        end
 
-        function S = skew(u)
-            % Generates a skew symetric matrix from a given vector u
-            S = [0 -u(3) u(2);
-                u(3) 0 -u(1);
-                -u(2) u(1) 0];
-        end
-    
-
-        function tensors = computeTensor(dAidqi, A_all)
-
-
-            % Extracting the transformation matrix derivatives wrt qi
-            dA01dq1 = dAidqi{1};
-            dA12dq2 = dAidqi{2};
-            dA23q3 = dAidqi{3};
-            dA34q4 = dAidqi{4};
-            dA45q5 = dAidqi{5};
-            dA56q6 = dAidqi{6};
-            dA67q7 = dAidqi{7};
-
-            % Computing the full tensors
-            dA01dq = cat(3, dA01dq1, zeros(4, 4), zeros(4, 4), zeros(4, 4), zeros(4, 4), zeros(4, 4), zeros(4, 4));
-            dA02dq = cat(3, dA01dq1*A_all{2}, A_all{1}*dA12dq2, zeros(4, 4), zeros(4, 4), zeros(4, 4), zeros(4, 4), zeros(4, 4));
-            dA03dq = cat(3, dA01dq1*A_all{2}*A_all{3}, A_all{1}*dA12dq2*A_all{3}, A_all{1}*A_all{2}*dA23q3, zeros(4, 4), zeros(4, 4), zeros(4, 4), zeros(4, 4));
-            dA04dq = cat(3, dA01dq1*A_all{2}*A_all{3}*A_all{4}, A_all{1}*dA12dq2*A_all{3}*A_all{4}, A_all{1}*A_all{2}*dA23q3*A_all{4}, A_all{1}*A_all{2}*A_all{3}*dA34q4, zeros(4, 4), zeros(4, 4), zeros(4, 4));
-            dA05dq = cat(3, dA01dq1*A_all{2}*A_all{3}*A_all{4}*A_all{5}, A_all{1}*dA12dq2*A_all{3}*A_all{4}*A_all{5}, A_all{1}*A_all{2}*dA23q3*A_all{3}*A_all{4}*A_all{5}, A_all{1}*A_all{2}*A_all{3}*dA34q4*A_all{5}, A_all{1}*A_all{2}*A_all{3}*A_all{4}*dA45q5, zeros(4, 4), zeros(4, 4));
-            dA06dq = cat(3, dA01dq1*A_all{2}*A_all{3}*A_all{4}*A_all{5}*A_all{6}, A_all{1}*dA12dq2*A_all{3}*A_all{4}*A_all{5}*A_all{6}, A_all{1}*A_all{2}*dA23q3*A_all{3}*A_all{4}*A_all{5}*A_all{6}, A_all{1}*A_all{2}*A_all{3}*dA34q4*A_all{5}*A_all{6}, A_all{1}*A_all{2}*A_all{3}*A_all{4}*dA45q5*A_all{6}, A_all{1}*A_all{2}*A_all{3}*A_all{4}*A_all{5}*dA56q6, zeros(4, 4));
-            dA07dq = cat(3, dA01dq1*A_all{2}*A_all{3}*A_all{4}*A_all{5}*A_all{6}*A_all{7}, A_all{1}*dA12dq2*A_all{3}*A_all{4}*A_all{5}*A_all{6}*A_all{7}, A_all{1}*A_all{2}*dA23q3*A_all{3}*A_all{4}*A_all{5}*A_all{6}*A_all{7}, A_all{1}*A_all{2}*A_all{3}*dA34q4*A_all{5}*A_all{6}*A_all{7}, A_all{1}*A_all{2}*A_all{3}*A_all{4}*dA45q5*A_all{6}*A_all{7}, A_all{1}*A_all{2}*A_all{3}*A_all{4}*A_all{5}*dA56q6*A_all{7}, A_all{1}*A_all{2}*A_all{3}*A_all{4}*A_all{5}*A_all{6}*dA67q7);
-            dA08dq = cat(3, dA01dq1*A_all{2}*A_all{3}*A_all{4}*A_all{5}*A_all{6}*A_all{7}*A_all{8}, A_all{1}*dA12dq2*A_all{3}*A_all{4}*A_all{5}*A_all{6}*A_all{7}*A_all{8}, A_all{1}*A_all{2}*dA23q3*A_all{3}*A_all{4}*A_all{5}*A_all{6}*A_all{7}*A_all{8}, A_all{1}*A_all{2}*A_all{3}*dA34q4*A_all{5}*A_all{6}*A_all{7}*A_all{8}, A_all{1}*A_all{2}*A_all{3}*A_all{4}*dA45q5*A_all{6}*A_all{7}*A_all{8}, A_all{1}*A_all{2}*A_all{3}*A_all{4}*A_all{5}*dA56q6*A_all{7}*A_all{8}, A_all{1}*A_all{2}*A_all{3}*A_all{4}*A_all{5}*A_all{6}*dA67q7*A_all{8});
-            tensors = {dA01dq,dA02dq,dA03dq,dA04dq,dA05dq,dA06dq,dA07dq,dA08dq};
-
-        end
+        % function [Ts, mArr, I, rC] = preCompute()
+        %     % Creating the coordinate transformations
+        %      Ts = {};
+        %      T01 = [1 0 0 0;
+        %      0 -1 0 0;
+        %      0 0 -1 0.1564;
+        %      0 0 0 1];
+        %      Ts{1} = T01;
+        %      T12 = [1 0 0 0;
+        %      0 0 -1 0.0054;
+        %      0 1 0 -0.1284;
+        %      0 0 0 1];
+        %      Ts{2} = T12;
+        %      T23 = [1 0 0 0;
+        %      0 0 1 -0.2104;
+        %      0 -1 0 -0.00640;
+        %      0 0 0 1];
+        %      Ts{3} = T23;
+        %      T34 = [1 0 0 0;
+        %      0 0 -1 0.0064;
+        %      0 1 0 -0.2104;
+        %      0 0 0 1];
+        %      Ts{4} = T34;
+        %      T45 = [1 0 0 0;
+        %      0 0 1 -0.2084;
+        %      0 -1 0 -0.0064;
+        %      0 0 0 1];
+        %      Ts{5} = T45;
+        %      T56 = [1 0 0 0;
+        %      0 0 -1 0;
+        %      0 1 0 -0.1059;
+        %      0 0 0 1];
+        %      Ts{6} = T56;
+        %      T67 = [1 0 0 0;
+        %      0 0 1 -0.1059;
+        %      0 -1 0 0;
+        %      0 0 0 1];
+        %      Ts{7} = T67;
+        %      T78 = [1 0 0 0;
+        %      0 -1 0 0;
+        %      0 0 -1 -0.0615;
+        %      0 0 0 1];
+        %      Ts{8} = T78;
+        % 
+        %     % Load toolbox robot
+        %     gen3 = loadrobot("kinovaGen3", "DataFormat", "column", "Version", 2);
+        % 
+        %     % Extract ALL parameters from toolbox for consistency
+        %     mArr = {1.667}; % Base mass only from manual
+        %     I = {[0.004622 0.000009 0.000060;
+        %           0.000009 0.004495 0.000009; 
+        %           0.000060 0.000009 0.002079]}; % Base inertia from manual
+        %     rC = {[-0.000648; -0.000166; 0.084487]}; % Base COM from manual
+        % 
+        %     for i = 1:length(gen3.Bodies)
+        %         % Extract mass
+        %         mArr{end+1} = gen3.Bodies{i}.Mass;
+        % 
+        %         % Extract and convert inertia
+        %         I_vec = gen3.Bodies{i}.Inertia;
+        %         I_matrix = [I_vec(1) I_vec(6) I_vec(5);
+        %                    I_vec(6) I_vec(2) I_vec(4);
+        %                    I_vec(5) I_vec(4) I_vec(3)];
+        %         I{end+1} = I_matrix;
+        % 
+        %         % Extract COM (in joint frame)
+        %         rC{end+1} = gen3.Bodies{i}.CenterOfMass.';
+        %     end
+        % end
+        % 
 
     end
 end
