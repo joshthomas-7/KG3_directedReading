@@ -653,11 +653,9 @@ classdef KG3 < handle
             % % Applying the control law using matlab's parameters
             % n = vProduct + G;
             % u = M*y + n;
-            
-
-
-            obj.G
-            G
+           
+            % obj.G
+            % G
             
         end
 
@@ -906,7 +904,7 @@ classdef KG3 < handle
             L = [8,8,8,8,8,8,8];
             % L = 8*ones(1,7);
             KP = diag(L);
-            KD = diag(1.5*L);
+            KD = diag(1*L);
             % KD = 2*8*eye(7,7);
 
 
