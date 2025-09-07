@@ -3,7 +3,7 @@ close
 clc
 
 %% Loading the KG3 
-gen3 = loadrobot("kinovaGen3", "DataFormat", "column", "Version", 1, Gravity=[0 0 -9.81]);
+gen3 = loadrobot("kinovaGen3", "DataFormat", "column", "Version", 2, Gravity=[0 0 -9.81]);
 % gen3 = loadrobot("kinovaGen3", "DataFormat", "column", Gravity=[0 0 -9.81]);
 b = gen3.Bodies;
 % show(gen3);
@@ -22,7 +22,7 @@ myKG3 = KG3();
 myKG3 = myKG3.FKM(q);
 
 %% Verifying the FKM
-% T = getTransform(gen3, q, 'end_effector_link')
+T = getTransform(gen3, q, 'end_effector_link')
 myKG3.T_all{end}
 
 %% Testing Jacobian computation
@@ -30,7 +30,7 @@ myKG3 = myKG3.computeJacobians();
 disp('My J')
 myKG3.J
 
-% J = geometricJacobian(gen3, q, 'end_effector_link')
+J = geometricJacobian(gen3, q, 'end_effector_link')
 
 %% Testing the Mass Matrix
 
@@ -137,9 +137,6 @@ p_init = T_init(1:3, 4);
 eul_init = rotm2eul(R_init);
 x_actual(:,1) = [p_init; eul_init'];
 
-% You can add some initial disturbance if desired
-% q_actual(:,1) = q_traj(:,1) + 0.05*randn(7,1);  % Small random disturbance
-% qdot_actual(:,1) = qdot_traj(:,1) + 0.1*randn(7,1);
 
 %% Simulation Loop
 fprintf('Running dynamics simulation...\n');
@@ -181,10 +178,6 @@ for i = 1:Nsim-1
     eul_new = rotm2eul(R_new);
     x_actual(:,i+1) = [p_new; eul_new'];
     
-    % Progress indicator
-    if mod(i, 10) == 0
-        fprintf('Progress: %d/%d (%.1f%%)\n', i, Nsim-1, 100*i/(Nsim-1));
-    end
 end
 
 M = massMatrix(gen3,q_curr);
@@ -195,7 +188,7 @@ u_control(:,end) = myKG3.inverseDynamicsControl([q_traj(:,end), qdot_traj(:,end)
                                                [q_actual(:,end), qdot_actual(:,end), qddot_actual(:,end)],...
                                                M, vProd, G);
 
-fprintf('Simulation completed!\n');
+fprintf('Simulation completed\n');
 
 %% Plotting Results
 
