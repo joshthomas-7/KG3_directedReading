@@ -421,18 +421,9 @@ classdef KG3 < handle
             if link_idx == 1
                 % Base link is not affected by any joint motion
                 return;  % Jacobians remain zero
-            % elseif link_idx <= N
-            %     % Joint link i is affected by joints 1 to (i-1)
-            %     affected_joints = 1:(link_idx-1);
-            % else
-            %     % End-effector is affected by all joints
-            %     affected_joints = 1:N;
-            % end
             else
                 affected_joints = 1:(link_idx-1);
             end
-
-            
 
             % For each joint that affects this link
             for j = affected_joints
@@ -566,7 +557,7 @@ classdef KG3 < handle
             end
         end
 
-        % 
+
         % function obj = computeGravityTorque(obj)
         %     % Computes gravity torque using geometric Jacobians
         %     % G_i = -∑_j m_j * J_v_j^T * g
@@ -615,8 +606,8 @@ classdef KG3 < handle
         %         % obj.G = obj.G - m_j * (J_v' * obj.gravity);
         %     end
         % end
-        % 
-        % 
+
+
         function affected = linkAffectedByJoint(obj, link_idx, joint_idx)
             % Determines if link_idx is affected by joint_idx motion
             
@@ -644,7 +635,7 @@ classdef KG3 < handle
             obj = obj.computeGravityTorque();
             obj = obj.computeAnalyticalJacobian();
 
-            y = obj.NLSF(QD, Q);
+            y = obj.PD_Control(QD, Q);
 
             % Apply the control law
             n = obj.C*qdot + obj.G;
@@ -659,7 +650,7 @@ classdef KG3 < handle
             
         end
 
-        function y = NLSF(obj, QD, Q)
+        function y = PD_Control(obj, QD, Q)
             % Change to controlling in joint space for now
             KD = obj.KD;
             KP = obj.KP;
@@ -793,7 +784,7 @@ classdef KG3 < handle
 
             % Defining the centre of mass position vectors
             % Note: Base COM is in base frame, other COMs are in preceding joint frame
-            rC = {};
+            % rC = {};
             % rC{1} = [0; 0; 0];   % Base (Table 75)
             % rC{2} = [-0.000023; -0.010364; -0.073360]; % Link 1 (Table 76)  
             % rC{3} = [-0.000044; -0.099580; -0.013278]; % Link 2 (Table 77)
@@ -809,87 +800,64 @@ classdef KG3 < handle
             rC{3} = [-0.000044; -0.099580; 0.013278]; % Link 2 (Table 77)
             rC{4} = [-0.000044; -0.006641; -0.117892]; % Link 3 (Table 78)
             rC{5} = [-0.000018; -0.075478; -0.015006]; % Link 4 (Table 79)
-            rC{6} = [0.000001; -0.009032; -0.063883];  % Link 5 (Table 80)
+            rC{6} = [0.000001; -0.009032; -0.063883];  % Link 5 (Table 80, modified)
             rC{7} = [0.000001; -0.045483; -0.009650];  % Link 6 (Table 81)
             rC{8} = [0.000281; 0.011402; -0.029798]; % Interface module with vision (Table 83)
 
             % Defining the inertia tensors for each link (exact manual values)
             % Manual format: [Ixx, Ixy, Ixz, Iyy, Iyz, Izz] -> Convert to 3x3 matrix
-            % I_vecs = [
-            %     % Base (Table 75)
-            %     0.004622 0.000009 0.000060 0.004495 0.000009 0.002079;
-            %     % Link 1 (Table 76) 
-            %     0.004570 0.000001 0.000002 0.004831 0.000448 0.001409;
-            %     % Link 2 (Table 77)
-            %     0.011088 0.000005 0.000000 0.001072 -0.000691 0.011255;
-            %     % Link 3 (Table 78)
-            %     0.010932 0.000000 -0.000007 0.011127 0.000606 0.001043;
-            %     % Link 4 (Table 79)
-            %     0.008147 -0.000001 0.000000 0.000631 -0.000500 0.008316;
-            %     % Link 5 (Table 80)
-            %     0.001596 0.000000 0.000000 0.001607 0.000256 0.000399;
-            %     % Link 6 (Table 81)
-            %     0.001641 0.000000 0.000000 0.000410 -0.000278 0.001641;
-            %     % Interface module with vision (Table 83)
-            %     0.000587 0.000003 0.000003 0.000369 0.000118 0.000609
-            %     % 0.000692 0.000003 0.000003 0.000542 0.000118 0.0001599  %gripper module
-            % ];
-
             I_vecs = [
                 % Base (Table 75)
                 0.004622 0.000009 0.000060 0.004495 0.000009 0.002079;
                 % Link 1 (Table 76) 
-                0.0121 0.0122 0.0016 -5.9917e-04 -3.2389e-07 6.7169e-07;
+                0.004570 0.000001 0.000002 0.004831 0.000448 0.001409;
                 % Link 2 (Table 77)
-                0.0228 0.0013 0.0228 -0.0022 -6.7981e-07 -9.8337e-08;
+                0.011088 0.000005 0.000000 0.001072 -0.000691 0.011255;
                 % Link 3 (Table 78)
-                0.0272 0.0273 0.0011 -3.0501e-04 -1.3036e-05 -3.4001e-07;
+                0.010932 0.000000 -0.000007 0.011127 0.000606 0.001043;
                 % Link 4 (Table 79)
-                0.0137 8.4046e-04 0.0136 -0.0016 -2.5125e-07 -2.2638e-06;
+                0.008147 -0.000001 0.000000 0.000631 -0.000500 0.008316;
                 % Link 5 (Table 80)
-                0.0044 0.0044 4.5933e-04 -1.5259e-04 4.3319e-08 6.3958e-09;
+                0.001596 0.000000 0.000000 0.001607 0.000256 0.000399;
                 % Link 6 (Table 81)
-                0.0031 4.7315e-04 0.0030 -5.7563e-04 6.5437e-09 3.0842e-08;
+                0.001641 0.000000 0.000000 0.000410 -0.000278 0.001641;
                 % Interface module with vision (Table 83)
-                0.0011 8.1300e-04 6.7404e-04 5.1878e-05 7.1866e-06 1.3980e-06
+                0.000587 0.000003 0.000003 0.000369 0.000118 0.000609
                 % 0.000692 0.000003 0.000003 0.000542 0.000118 0.0001599  %gripper module
             ];
 
-                        % Convert inertia vectors to 3x3 matrices
-            I = {};
-            n = length(I_vecs);
-            for i=1:n
-                % Extract inertia vector components
-                Ii = I_vecs(i,:);
-                Ixx = Ii(1);
-                Iyy = Ii(2);  % Manual: Ixy is 2nd element
-                Izz = Ii(3);  % Manual: Ixz is 3rd element  
-                Iyz = Ii(4);  % Manual: Iyy is 4th element
-                Ixz = Ii(5);  % Manual: Iyz is 5th element
-                Ixy = Ii(6);  % Manual: Izz is 6th element
-                % Ixy = 0;
-                % Ixz = 0;
-                % Iyz = 0;
+            % I_vecs = [
+            %     % Base (Table 75)
+            %     0.004622 0.000009 0.000060 0.004495 0.000009 0.002079;
+            %     % Link 1 (Table 76) 
+            %     0.0121 0.0122 0.0016 -5.9917e-04 -3.2389e-07 6.7169e-07;
+            %     % Link 2 (Table 77)
+            %     0.0228 0.0013 0.0228 -0.0022 -6.7981e-07 -9.8337e-08;
+            %     % Link 3 (Table 78)
+            %     0.0272 0.0273 0.0011 -3.0501e-04 -1.3036e-05 -3.4001e-07;
+            %     % Link 4 (Table 79)
+            %     0.0137 8.4046e-04 0.0136 -0.0016 -2.5125e-07 -2.2638e-06;
+            %     % Link 5 (Table 80)
+            %     0.0044 0.0044 4.5933e-04 -1.5259e-04 4.3319e-08 6.3958e-09;
+            %     % Link 6 (Table 81)
+            %     0.0031 4.7315e-04 0.0030 -5.7563e-04 6.5437e-09 3.0842e-08;
+            %     % Interface module with vision (Table 83)
+            %     0.0011 8.1300e-04 6.7404e-04 5.1878e-05 7.1866e-06 1.3980e-06
+            %     % 0.000692 0.000003 0.000003 0.000542 0.000118 0.0001599  %gripper module
+            % ];
 
-                % Form symmetric inertia tensor
-                I{i} = [Ixx Ixy Ixz;
-                        Ixy Iyy Iyz;
-                        Ixz Iyz Izz];
-            end
-            
-
-            % % Convert inertia vectors to 3x3 matrices
+            %             % Convert inertia vectors to 3x3 matrices
             % I = {};
             % n = length(I_vecs);
             % for i=1:n
             %     % Extract inertia vector components
             %     Ii = I_vecs(i,:);
             %     Ixx = Ii(1);
-            %     Ixy = Ii(2);  % Manual: Ixy is 2nd element
-            %     Ixz = Ii(3);  % Manual: Ixz is 3rd element  
-            %     Iyy = Ii(4);  % Manual: Iyy is 4th element
-            %     Iyz = Ii(5);  % Manual: Iyz is 5th element
-            %     Izz = Ii(6);  % Manual: Izz is 6th element
+            %     Iyy = Ii(2);  % Manual: Ixy is 2nd element
+            %     Izz = Ii(3);  % Manual: Ixz is 3rd element  
+            %     Iyz = Ii(4);  % Manual: Iyy is 4th element
+            %     Ixz = Ii(5);  % Manual: Iyz is 5th element
+            %     Ixy = Ii(6);  % Manual: Izz is 6th element
             %     % Ixy = 0;
             %     % Ixz = 0;
             %     % Iyz = 0;
@@ -899,12 +867,36 @@ classdef KG3 < handle
             %             Ixy Iyy Iyz;
             %             Ixz Iyz Izz];
             % end
+            
+
+            % Convert inertia vectors to 3x3 matrices
+            I = {};
+            n = length(I_vecs);
+            for i=1:n
+                % Extract inertia vector components
+                Ii = I_vecs(i,:);
+                Ixx = Ii(1);
+                Ixy = Ii(2);  % Manual: Ixy is 2nd element
+                Ixz = Ii(3);  % Manual: Ixz is 3rd element  
+                Iyy = Ii(4);  % Manual: Iyy is 4th element
+                Iyz = Ii(5);  % Manual: Iyz is 5th element
+                Izz = Ii(6);  % Manual: Izz is 6th element
+                % Ixy = 0;
+                % Ixz = 0;
+                % Iyz = 0;
+
+                % Form symmetric inertia tensor
+                I{i} = [Ixx Ixy Ixz;
+                        Ixy Iyy Iyz;
+                        Ixz Iyz Izz];
+            end
+
 
             % KP = 8*eye(7,7);
             L = [8,8,8,8,8,8,8];
             % L = 8*ones(1,7);
-            KP = diag(L);
-            KD = diag(1*L);
+            KP = diag(L.^2);
+            KD = diag(1.5*L);
             % KD = 2*8*eye(7,7);
 
 
