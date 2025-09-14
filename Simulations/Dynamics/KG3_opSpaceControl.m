@@ -15,54 +15,16 @@ myKG3 = KG3();
 myKG3 = myKG3.FKM(q);
 
 %% Robot Dynamics Simulation Script with Operational Space Control
+% clear;
 
 % Load the previously computed trajectory data
 data = load('joint_space_data.mat');
 q_traj = data.q_history;      % Reference joint positions
 qdot_traj = data.qdot_history; % Reference joint velocities
 qddot_traj = data.qddot_history; % Reference joint accelerations
-
-% Compute desired end-effector trajectory from joint trajectory
-fprintf('Computing desired end-effector trajectory from joint data...\n');
-N = size(q_traj, 2);
-x_ee_desired = zeros(6, N);
-dx_ee_desired = zeros(6, N);
-ddx_ee_desired = zeros(6, N);
-
-for i = 1:N
-    % Compute desired end-effector pose
-    T_des = getTransform(gen3, q_traj(:,i), 'end_effector_link');
-    R_des = T_des(1:3, 1:3);
-    p_des = T_des(1:3, 4);
-    eul_des = rotm2eul(R_des);
-    x_ee_desired(:,i) = [p_des; eul_des'];
-    
-    % Compute desired end-effector velocity using Jacobian
-    if i > 1
-        J_des = geometricJacobian(gen3, q_traj(:,i), 'end_effector_link');
-        % Convert geometric to analytical Jacobian format
-        phi = eul_des(1);
-        theta = eul_des(2);
-        T_analytical = [0 -sin(phi)  cos(phi)*cos(theta);
-                       0  cos(phi)  sin(phi)*cos(theta);
-                       1  0        -sin(theta)];
-        TA = [eye(3) zeros(3); zeros(3) T_analytical];
-        
-        % Reorder geometric Jacobian to [linear; angular] format
-        J_reordered = [J_des(4:6,:); J_des(1:3,:)];
-        JA_des = TA \ J_reordered;
-        
-        dx_ee_desired(:,i) = JA_des * qdot_traj(:,i);
-    end
-    
-    % Compute desired end-effector acceleration (simplified)
-    if i > 2
-        dt = data.ts(i) - data.ts(i-1);
-        ddx_ee_desired(:,i) = (dx_ee_desired(:,i) - dx_ee_desired(:,i-1)) / dt;
-    end
-end
-
-fprintf('Desired end-effector trajectory computed.\n');
+x_ee_desired = data.x_ee_desired;   % Reference pose
+dx_ee_desired = data.dx_ee_desired; % Reference pose velocity
+ddx_ee_desired = data.ddx_ee_desired;   % Reference pose acceleration
 
 time_vec = data.ts;
 
@@ -267,6 +229,30 @@ ylabel('Orientation Error (deg)');
 xlabel('Time (s)');
 title('End-Effector Orientation Tracking Errors');
 legend('\phi Error', '\theta Error', '\psi Error', 'Location', 'best');
+grid on;
+
+% End-effector velocity tracking errors
+figure(5);
+vel_linear_error = dx_ee_desired(1:3,:) - dx_actual(1:3,:);
+vel_angular_error = dx_ee_desired(4:6,:) - dx_actual(4:6,:);
+
+subplot(2,1,1);
+plot(time_vec, 1000*vel_linear_error(1,:), 'b-', 'LineWidth', 1.5); hold on;
+plot(time_vec, 1000*vel_linear_error(2,:), 'r-', 'LineWidth', 1.5);
+plot(time_vec, 1000*vel_linear_error(3,:), 'g-', 'LineWidth', 1.5);
+ylabel('Linear Velocity Error (mm/s)');
+title('End-Effector Linear Velocity Tracking Errors');
+legend('V_x Error', 'V_y Error', 'V_z Error', 'Location', 'best');
+grid on;
+
+subplot(2,1,2);
+plot(time_vec, rad2deg(vel_angular_error(1,:)), 'b-', 'LineWidth', 1.5); hold on;
+plot(time_vec, rad2deg(vel_angular_error(2,:)), 'r-', 'LineWidth', 1.5);
+plot(time_vec, rad2deg(vel_angular_error(3,:)), 'g-', 'LineWidth', 1.5);
+ylabel('Angular Velocity Error (deg/s)');
+xlabel('Time (s)');
+title('End-Effector Angular Velocity Tracking Errors');
+legend('\omega_\phi Error', '\omega_\theta Error', '\omega_\psi Error', 'Location', 'best');
 grid on;
 
 %% Save simulation results
