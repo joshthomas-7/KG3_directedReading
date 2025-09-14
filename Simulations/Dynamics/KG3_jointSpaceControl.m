@@ -15,7 +15,7 @@ q = randomConfiguration(gen3);
 % q = [0.3919, -1.3412, -0.9480, -1.0817, -0.5078, -0.3382, 0.0125].';
 
 % qdot = [0.1, 0.2, -0.1, 0.05, -0.15, 0.08, 0.12].';
-qdot = generateRandomQdot('realistic')
+qdot = generateRandomQdot('slow')
 % qdot = zeros(7,1);
 
 myKG3 = KG3();
@@ -69,7 +69,7 @@ QD = Q;
 % u = myKG3.inverseDynamicsControl(QD,Q);
 
 %% Robot Dynamics Simulation Script
-clear; clc;
+clear;
 
 % Load the previously computed trajectory data
 data = load('joint_space_data.mat');
@@ -385,6 +385,7 @@ function qdot = generateRandomQdot(method, varargin)
     end
     fprintf(']\n\n');
 end
+
 
 % function simulationResults = simulateKG3FreeMotion(robot, q0, qdot0, tspan)
 %     % Simulates free motion dynamics of the KG3 robot (no control torques)

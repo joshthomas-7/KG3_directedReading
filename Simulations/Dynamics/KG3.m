@@ -31,6 +31,7 @@ classdef KG3 < handle
         J % geometric jacobian.
         JA  % Analytical Jacobian
         H   % Analytical Hessian
+        JA_dot % Time derivative of the analytical Jacobian
 
         qdot
         dt
@@ -45,8 +46,13 @@ classdef KG3 < handle
         gravity = [0; 0; -9.81];    %m/s^2 default gravity vector 
 
         %% Control Properties
+        % Joint space control
         KD
         KP
+        
+        % Operational space control
+        KD_op
+        KP_op
 
     end
 
@@ -55,7 +61,7 @@ classdef KG3 < handle
             %KG3 Construct an instance of this class
             % Precomputes the homogenous transformations between each frame
             % of the KG3 
-            [obj.Ts, obj.mArr, obj.I, obj.r_COM, obj.KD, obj.KP] = KG3.preCompute();
+            [obj.Ts, obj.mArr, obj.I, obj.r_COM, obj.KD, obj.KP, obj.KD_op, obj.KP_op] = KG3.preCompute();
         end
 
 
@@ -224,6 +230,32 @@ classdef KG3 < handle
             obj = obj.FKM(q_orig);
             obj = obj.computeJacobians();
             obj = obj.computeAnalyticalJacobian();
+        end
+
+        function obj = computeAnalyticalJacobianDot(obj, qdot)
+            % Computes the time derivative of the analytical Jacobian using the analytical Hessian
+            % JA_dot_ij = Σₖ H_ijk * qdot_k
+            % where H_ijk is the analytical Hessian tensor
+            
+            % Ensure Hessian is computed first
+            if isempty(obj.H)
+                obj = obj.computeAnalyticalHessian();
+            end
+            
+            N = length(obj.q);  % Number of joints (7)
+            
+            % Initialize Jacobian time derivative
+            obj.JA_dot = zeros(6, N);
+            
+            % For each element of the Jacobian
+            for i = 1:6  % 6 DOF
+                for j = 1:N  % 7 joints
+                    % Sum over all joint velocities
+                    for k = 1:N
+                        obj.JA_dot(i, j) = obj.JA_dot(i, j) + obj.H(i, j, k) * qdot(k);
+                    end
+                end
+            end
         end
 
         function ddx = computePoseAcceleration(obj, qdot, qddot)
@@ -635,6 +667,7 @@ classdef KG3 < handle
             obj = obj.computeGravityTorque();
             obj = obj.computeAnalyticalJacobian();
 
+
             y = obj.PD_Control(QD, Q);
 
             % Apply the control law
@@ -675,6 +708,41 @@ classdef KG3 < handle
 
         end
 
+        function u = inverseDynamicsControl_OPSpace(obj, XD, X, Q)
+            % Performs motion control of the KG3 in the operational space
+            % Inputs: 
+            % - XD desired end effector trajectory [x, xdot, xddot]
+            % - X true end effector trajectory [x, xdot, xddot]
+            % - Q true joint space trajectory [q, qdot, qddot]
+
+            KD = obj.KD_op;
+            KP = obj.KP_op;
+
+            % Update the dynamics based on the joint configuration
+            qdot = Q(:,2);
+            obj = obj.FKM(Q(:,1));
+            obj = obj.computeJacobians();
+            obj = obj.computeMassMatrix();
+            obj = obj.computeCoriolisMatrix(qdot);
+            obj = obj.computeGravityTorque();
+            obj = obj.computeAnalyticalJacobian();
+            obj = obj.computeAnalyticalHessian();
+            obj = obj.computeAnalyticalJacobianDot(qdot);
+
+            JA = obj.JA;
+            JA_dot = obj.JA_dot;
+
+            % Computing the required qddot
+            xtilde = XD(:,1) - X(:,1);
+            xtilde_dot = XD(:,2) - X(:,2);
+            xd_ddot = XD(:,3);
+            y = pinv(JA)*(xd_ddot + KD*xtilde_dot + KP*xtilde - JA_dot*qdot);
+
+            % Applying the control law
+            n = obj.C*qdot + obj.G;
+            u = obj.M*y + n;
+        end
+
         function S = skew(v)
             % Creates skew-symmetric matrix from 3D vector
             S = [0    -v(3)  v(2);
@@ -686,7 +754,7 @@ classdef KG3 < handle
 
     methods (Static)
 
-        function [Ts, mArr, I, rC, KD, KP] = preCompute()
+        function [Ts, mArr, I, rC, KD, KP, KD_op, KP_op] = preCompute()
             % Creating the coordinate transformations
             Ts = {};
 
@@ -893,11 +961,16 @@ classdef KG3 < handle
 
 
             % KP = 8*eye(7,7);
-            L = [8,8,8,8,8,8,8];
-            % L = 8*ones(1,7);
+            % L = [8,8,8,8,8,8,8];
+            L = (4/0.4)*ones(1,7);
             KP = diag(L.^2);
-            KD = diag(1.5*L);
+            KD = diag(2*L);
             % KD = 2*8*eye(7,7);
+            
+            L_op = (4/0.4)*ones(1,6);
+            zeta_op = 0.5;               % Damping parameter for operational space control
+            KP_op = diag(L_op.^2);
+            KD_op = diag(2*zeta_op*L_op);
 
 
         end
