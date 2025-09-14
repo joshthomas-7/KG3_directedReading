@@ -24,6 +24,8 @@ timePoints = [0 3 6];
 % waypoints = [0.579  -0.004 0.4338 pi/2 0 pi/2; 
 %              0.579  -0.20 0.65 pi/2 deg2rad(45) pi/2;
 %              0.75  -0.004 0.4338 pi/2 0 pi/2]';
+
+% Alternate trajectory
 waypoints = [0.579  -0.004 0.4338 pi/2 0 pi/2; 
              0.200  -0.20 0.65 pi/2 pi/4 pi/4;
              0.300  -0.004 0.4338 pi/2 pi/3 0]';
@@ -111,6 +113,11 @@ qddot_history = zeros(7, N);   % Joint accelerations
 x_ee_history = zeros(6, N);    % End-effector positions and orientations [x,y,z,phi,theta,psi]
 dx_ee_history = zeros(6, N);   % End-effector velocities
 ddx_ee_history = zeros(6, N);  % End-effector accelerations
+
+% Store desired end-effector trajectory (this is the key addition)
+x_ee_desired = x_ref;          % Desired end-effector poses [x,y,z,phi,theta,psi]
+dx_ee_desired = dx_ref;        % Desired end-effector velocities
+ddx_ee_desired = ddx_ref;      % Desired end-effector accelerations
 
 configs = {};
 
@@ -230,51 +237,63 @@ legend('\phi*', '\phi','\theta*', '\theta','\psi*', '\psi')
 %% Velocity Validation Plots
 figure(5)
 subplot(3,2,1);
-plot(ts, dx_act(1,:), 'r-', 'LineWidth', 2); hold on;
+hold on;
+% plot(ts, dx_act(1,:), 'r-', 'LineWidth', 2); hold on;
 plot(ts, dx_finite_diff(1,:), 'b--', 'LineWidth', 2);
 plot(ts, dx_ref(1,:), 'k:', 'LineWidth', 2);
 ylabel('dx (m/s)'); title('X-velocity');
-legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+% legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+legend('True', 'Desired'); grid on;
 xlim([0.5,6])
 
 subplot(3,2,3);
-plot(ts, dx_act(2,:), 'r-', 'LineWidth', 2); hold on;
+hold on;
+% plot(ts, dx_act(2,:), 'r-', 'LineWidth', 2); hold on;
 plot(ts, dx_finite_diff(2,:), 'b--', 'LineWidth', 2);
 plot(ts, dx_ref(2,:), 'k:', 'LineWidth', 2);
 ylabel('dy (m/s)'); title('Y-velocity');
-legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+% legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+legend('True', 'Desired'); grid on;
 xlim([0.5,6])
 
 subplot(3,2,5);
-plot(ts, dx_act(3,:), 'r-', 'LineWidth', 2); hold on;
+hold on;
+% plot(ts, dx_act(3,:), 'r-', 'LineWidth', 2); hold on;
 plot(ts, dx_finite_diff(3,:), 'b--', 'LineWidth', 2);
 plot(ts, dx_ref(3,:), 'k:', 'LineWidth', 2);
 ylabel('dz (m/s)'); xlabel('Time (s)'); title('Z-velocity');
-legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+% legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+legend('True', 'Desired'); grid on;
 xlim([0.5,6])
 
 subplot(3,2,2);
-plot(ts, rad2deg(dx_act(4,:)), 'r-', 'LineWidth', 2); hold on;
+hold on;
+% plot(ts, rad2deg(dx_act(4,:)), 'r-', 'LineWidth', 2); hold on;
 plot(ts, rad2deg(dx_finite_diff(4,:)), 'b--', 'LineWidth', 2);
 plot(ts, rad2deg(dx_ref(4,:)), 'k:', 'LineWidth', 2);
 ylabel('d\phi (deg/s)'); title('\phi-velocity');
-legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+% legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+legend('True', 'Desired'); grid on;
 xlim([0.5,6])
 
 subplot(3,2,4);
-plot(ts, rad2deg(dx_act(5,:)), 'r-', 'LineWidth', 2); hold on;
+hold on;
+% plot(ts, rad2deg(dx_act(5,:)), 'r-', 'LineWidth', 2); hold on;
 plot(ts, rad2deg(dx_finite_diff(5,:)), 'b--', 'LineWidth', 2);
 plot(ts, rad2deg(dx_ref(5,:)), 'k:', 'LineWidth', 2);
 ylabel('d\theta (deg/s)'); title('\theta-velocity');
-legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+% legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+legend('True', 'Desired'); grid on;
 xlim([0.5,6])
 
 subplot(3,2,6);
-plot(ts, rad2deg(dx_act(6,:)), 'r-', 'LineWidth', 2); hold on;
+hold on;
+% plot(ts, rad2deg(dx_act(6,:)), 'r-', 'LineWidth', 2); hold on;
 plot(ts, rad2deg(dx_finite_diff(6,:)), 'b--', 'LineWidth', 2);
 plot(ts, rad2deg(dx_ref(6,:)), 'k:', 'LineWidth', 2);
 ylabel('d\psi (deg/s)'); xlabel('Time (s)'); title('\psi-velocity');
-legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+% legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
+legend('True', 'Desired'); grid on;
 xlim([0.5,6])
 
 %% Acceleration Comparison Plots
@@ -324,9 +343,11 @@ legend('Jacobian', 'Finite Diff', 'Desired'); grid on;
 
 %% Save joint space and end-effector data for further analysis
 save('joint_space_data.mat', 'q_history', 'qdot_history', 'qddot_history', ...
-     'x_ee_history', 'dx_ee_history', 'ddx_ee_history', 'ts');
+     'x_ee_history', 'dx_ee_history', 'ddx_ee_history', ...
+     'x_ee_desired', 'dx_ee_desired', 'ddx_ee_desired', 'ts');
 
 fprintf('\nJoint space and end-effector data saved to joint_space_data.mat\n');
+fprintf('Desired end-effector trajectory included for control script use.\n');
 
 %% Animation of the configurations
 % dt = ts(2) - ts(1);
