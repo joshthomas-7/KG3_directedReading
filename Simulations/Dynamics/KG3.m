@@ -968,7 +968,7 @@ classdef KG3 < handle
             % KD = 2*8*eye(7,7);
             
             L_op = (4/0.4)*ones(1,6);
-            zeta_op = 0.5;               % Damping parameter for operational space control
+            zeta_op = 1;               % Damping parameter for operational space control
             KP_op = diag(L_op.^2);
             KD_op = diag(2*zeta_op*L_op);
 
