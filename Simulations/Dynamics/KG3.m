@@ -593,9 +593,11 @@ classdef KG3 < handle
         end
 
         function y = PD_Control(obj, QD, Q)
-            % Change to controlling in joint space for now
-            KD = obj.KD;
-            KP = obj.KP;
+            % Implements the linear state feedback PD controller for the
+            % joint space motion controller
+
+            KD = obj.KD;    % Derivative gains
+            KP = obj.KP;    % Proportional gains
             
             qD = QD(:,1);
             qDdot = QD(:,2);
@@ -607,14 +609,6 @@ classdef KG3 < handle
 
             r = qDddot + KD*qDdot + KP*qD;
             y = -KP*q - KD*qdot + r;
-
-            % E = Qd - Q;
-            % e = E(1);
-            % edot = E(2);
-            % eddot = E(3);
-
-            % y = pinv(myKG3.JA)*(eddot + KD*edot + KP*e - )
-
         end
 
 
