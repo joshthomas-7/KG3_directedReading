@@ -1,7 +1,8 @@
-// This script is a temporarily holds the operational space motion control function
+// This script temporarily holds the operational space motion control function
 // It will be integrated in to dynamicsTest.cpp 
+// It aims to implement the operational space motion control method defined in Simulations/Dynamics/KG3.m
 
-Eigen::VectorXd SystemKG3::computeInput(const Eigen::VectorXd &x, const Eigen::VectorXd &xestar) {
+Eigen::VectorXd SystemKG3::computeInput(const Eigen::VectorXd &x, const Vec6d &xestar_in) {
     // Extract joint velocities (dqdt) and positions (q) from the state vector
     Eigen::VectorXd dqdt = x.segment(0,7);
     Eigen::VectorXd q = x.segment(7,7);
@@ -38,7 +39,12 @@ Eigen::VectorXd SystemKG3::computeInput(const Eigen::VectorXd &x, const Eigen::V
     }
 
     // Control law
+    // dxedt = JA*dqdt
+    // ddxedt = dJAdt*dqdt + JA*dqdt
+    Eigen::VectorXd RHS = xestarddt + KD*(xestardt - JA*dqdt) + KP*(xestar - xe) - dJAdt*dqdt;
 
+    Eigen::VectorXd qdd = JA.colPivHouseholderQr().solve(RHS);
+    Eigen::VectorXd u = M*qdd + C*dqdt + D*dqdt + g;
 
 
 }
