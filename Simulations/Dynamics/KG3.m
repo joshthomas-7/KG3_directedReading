@@ -565,7 +565,14 @@ classdef KG3 < handle
         end
 
         %% Control
-        function u = inverseDynamicsControl(obj, QD, Q, M, vProduct, G)
+        % Joint space control
+        function u = inverseDynamicsControl(obj, QD, Q)
+            % Performs motion control of the KG3 in joint space
+            % Inputs:
+            % - QD desired joint trajectory [q, qdot, qddot]
+            % - Q true joint space trajectory [q, qdot, qddot]
+            % Outputs:
+            % - u control torques
 
             % Update the dynamics based on the joint configuration
             qdot = Q(:,2);
@@ -581,15 +588,7 @@ classdef KG3 < handle
 
             % Apply the control law
             n = obj.C*qdot + obj.G;
-            u = obj.M*y + n;
-
-            % % Applying the control law using matlab's parameters
-            % n = vProduct + G;
-            % u = M*y + n;
-           
-            % obj.G
-            % G
-            
+            u = obj.M*y + n;            
         end
 
         function y = PD_Control(obj, QD, Q)
@@ -610,14 +609,16 @@ classdef KG3 < handle
             r = qDddot + KD*qDdot + KP*qD;
             y = -KP*q - KD*qdot + r;
         end
-
-
+        
+        % Operational space control
         function u = inverseDynamicsControl_OPSpace(obj, XD, X, Q)
             % Performs motion control of the KG3 in the operational space
             % Inputs:
             % - XD desired end effector trajectory [x, xdot, xddot]
             % - X true end effector trajectory [x, xdot, xddot]
             % - Q true joint space trajectory [q, qdot, qddot]
+            % Outputs:
+            % - u control torques
 
             % Initialize persistent variables for exponential filter
             persistent u_filtered_prev
@@ -683,7 +684,8 @@ classdef KG3 < handle
             u = u_filtered;
 
         end
-
+        
+        % Operational space control without singularity handling
         % function u = inverseDynamicsControl_OPSpace(obj, XD, X, Q)
         %     % Performs motion control of the KG3 in the operational space
         %     % Inputs: 
@@ -926,30 +928,30 @@ classdef KG3 < handle
                 % Extract inertia vector components
                 Ii = I_vecs(i,:);
                 Ixx = Ii(1);
-                Ixy = Ii(2);  % Manual: Ixy is 2nd element
-                Ixz = Ii(3);  % Manual: Ixz is 3rd element  
-                Iyy = Ii(4);  % Manual: Iyy is 4th element
-                Iyz = Ii(5);  % Manual: Iyz is 5th element
-                Izz = Ii(6);  % Manual: Izz is 6th element
-                % Ixy = 0;
-                % Ixz = 0;
-                % Iyz = 0;
+                Ixy = Ii(2);
+                Ixz = Ii(3); 
+                Iyy = Ii(4);
+                Iyz = Ii(5);
+                Izz = Ii(6);
 
-                % Form symmetric inertia tensor
+                % Form inertia tensor
                 I{i} = [Ixx Ixy Ixz;
                         Ixy Iyy Iyz;
                         Ixz Iyz Izz];
             end
-
-
+            
+            % Controller Gains
+            
+            % Joint space motion control:
             % KP = 8*eye(7,7);
             % L = [8,8,8,8,8,8,8];
             L = (4/0.4)*ones(1,7);
-            zeta = 1;
-            KP = diag(L.^2);
-            KD = diag(2*zeta*L);
+            zeta = 1;               % Damping parameter
+            KP = diag(L.^2);        % Proportional gains
+            KD = diag(2*zeta*L);    % Derivative gains
             % KD = 2*8*eye(7,7);
             
+            % Operational space motion control:
             L_op = (4/0.4)*ones(1,6);
             zeta_op = 1;               % Damping parameter for operational space control
             KP_op = diag(L_op.^2);

@@ -18,93 +18,19 @@ q = randomConfiguration(gen3);
 qdot = generateRandomQdot('slow')
 % qdot = zeros(7,1);
 
-myKG3 = KG3();
-myKG3 = myKG3.FKM(q);
 
-%% Verifying the FKM
-T = getTransform(gen3, q, 'end_effector_link')
-myKG3.T_all{end}
-
-%% Testing Jacobian computation
-myKG3 = myKG3.computeJacobians();
-disp('My J')
-myKG3.J
-
-J = geometricJacobian(gen3, q, 'end_effector_link')
-
-%% Testing the Mass Matrix
-
-M = massMatrix(gen3, q)
-
-myKG3 = myKG3.computeMassMatrix();
-myKG3.M
-
-%% Testing the coriolis matrix
-
-myKG3 = myKG3.computeCoriolisMatrix(qdot);
-
-C = myKG3.C;
-estTorque = C*qdot
-
-trueTorque = velocityProduct(gen3, q, qdot)
-
-%% Testing Gravity Torque
-myKG3 = myKG3.computeGravityTorque();
-% myKG3 = myKG3.computeGravityTorqueAnalyticalSimplified();
-disp('My G')
-myKG3.G
-
-G = gravityTorque(gen3, q)
-
-%% Testing Acceleration
-
-qddot_matlab = forwardDynamics(gen3, q, qdot)
-qddot = myKG3.M\(-myKG3.C*qdot - myKG3.G)
-%% Dynamics Simulation
-tspan = [0, 1];                                         % 5 second simulation
-
-Q = [q, qdot, qddot];
-QD = Q;
-
-% u = myKG3.inverseDynamicsControl(QD,Q);
 
 %% Robot Dynamics Simulation Script
-clear;
+% clear;
 
 % Load the previously computed trajectory data
 data = load('joint_space_data.mat');
 q_traj = data.q_history;      % Reference joint positions
 qdot_traj = data.qdot_history; % Reference joint velocities
 qddot_traj = data.qddot_history; % Reference joint accelerations
-
-% Check if end-effector trajectory data exists
-if isfield(data, 'x_ee_history')
-    x_ee_desired = data.x_ee_history;    % Desired end-effector trajectory
-    dx_ee_desired = data.dx_ee_history;  % Desired end-effector velocities
-    fprintf('Loaded desired end-effector trajectory from saved data.\n');
-else
-    % If not available, compute desired end-effector trajectory from joint trajectory
-    fprintf('Computing desired end-effector trajectory from joint data...\n');
-    N = size(q_traj, 2);
-    x_ee_desired = zeros(6, N);
-    dx_ee_desired = zeros(6, N);
-    
-    for i = 1:N
-        % Compute desired end-effector pose
-        T_des = getTransform(gen3, q_traj(:,i), 'end_effector_link');
-        R_des = T_des(1:3, 1:3);
-        p_des = T_des(1:3, 4);
-        eul_des = rotm2eul(R_des);
-        x_ee_desired(:,i) = [p_des; eul_des'];
-        
-        % Compute desired end-effector velocity using Jacobian
-        if i > 1
-            J_des = geometricJacobian(gen3, q_traj(:,i), 'end_effector_link');
-            dx_ee_desired(:,i) = J_des * qdot_traj(:,i);
-        end
-    end
-    fprintf('Desired end-effector trajectory computed.\n');
-end
+x_ee_desired = data.x_ee_desired;   % Reference pose
+dx_ee_desired = data.dx_ee_desired; % Reference pose velocity
+ddx_ee_desired = data.ddx_ee_desired;   % Reference pose acceleration
 
 time_vec = data.ts;
 
@@ -124,6 +50,7 @@ u_control = zeros(7, Nsim);     % Control torques
 
 % Initialize end-effector pose arrays
 x_actual = zeros(6, Nsim);      % Actual end-effector pose [x,y,z,phi,theta,psi]
+dx_actual = zeros(6, Nsim);     % Actual end-effector velocity
 
 % Initial conditions (start from reference trajectory)
 q_actual(:,1) = q_traj(:,1);
@@ -136,7 +63,6 @@ R_init = T_init(1:3, 1:3);
 p_init = T_init(1:3, 4);
 eul_init = rotm2eul(R_init);
 x_actual(:,1) = [p_init; eul_init'];
-
 
 %% Simulation Loop
 fprintf('Running dynamics simulation...\n');
@@ -156,7 +82,7 @@ for i = 1:Nsim-1
     M = massMatrix(gen3,q_curr);
     vProd = velocityProduct(gen3,q_curr,qdot_curr);
     G = gravityTorque(gen3,q_curr);
-    u = myKG3.inverseDynamicsControl(QD_desired, Q_actual, M, vProd, G);
+    u = myKG3.inverseDynamicsControl(QD_desired, Q_actual);
     u_control(:,i) = u;
     
     % Simulate forward dynamics to get actual acceleration
@@ -178,6 +104,15 @@ for i = 1:Nsim-1
     eul_new = rotm2eul(R_new);
     x_actual(:,i+1) = [p_new; eul_new'];
     
+    % Compute end-effector velocity using finite differences
+    % This provides the "true" end-effector velocity based on actual pose changes
+    if i == 1
+        % For first iteration, use forward difference
+        dx_actual(:,i+1) = (x_actual(:,i+1) - x_actual(:,i)) / dt;
+    else
+        % For subsequent iterations, use central difference for better accuracy
+        dx_actual(:,i+1) = (x_actual(:,i+1) - x_actual(:,i-1)) / (2*dt);
+    end
 end
 
 M = massMatrix(gen3,q_curr);
@@ -185,8 +120,13 @@ vProd = velocityProduct(gen3,q_curr,qdot_curr);
 G = gravityTorque(gen3,q_curr);
 % Store final control torque
 u_control(:,end) = myKG3.inverseDynamicsControl([q_traj(:,end), qdot_traj(:,end), qddot_traj(:,end)], ...
-                                               [q_actual(:,end), qdot_actual(:,end), qddot_actual(:,end)],...
-                                               M, vProd, G);
+                                               [q_actual(:,end), qdot_actual(:,end), qddot_actual(:,end)]);
+
+% Update velocity for current iteration (needed for control loop)
+if i > 1
+    dx_curr = (x_actual(:,i) - x_actual(:,i-1)) / dt;
+    dx_actual(:,i) = dx_curr;
+end
 
 fprintf('Simulation completed\n');
 
@@ -202,7 +142,7 @@ plot(time_vec, x_actual(2,:), 'r-', 'LineWidth', 2);
 plot(time_vec, x_ee_desired(3,:), 'g--', 'LineWidth', 2);
 plot(time_vec, x_actual(3,:), 'g-', 'LineWidth', 2);
 ylabel('Position (m)');
-title('End-Effector Position Tracking');
+title('End-Effector Position Tracking (Joint Space Control)');
 legend('X_{des}', 'X_{act}', 'Y_{des}', 'Y_{act}', 'Z_{des}', 'Z_{act}', 'Location', 'best');
 grid on;
 
@@ -215,8 +155,35 @@ plot(time_vec, rad2deg(x_ee_desired(6,:)), 'g--', 'LineWidth', 2);
 plot(time_vec, rad2deg(x_actual(6,:)), 'g-', 'LineWidth', 2);
 ylabel('Orientation (deg)');
 xlabel('Time (s)');
-title('End-Effector Orientation Tracking');
+title('End-Effector Orientation Tracking (Joint Space Control)');
 legend('\phi_{des}', '\phi_{act}', '\theta_{des}', '\theta_{act}', '\psi_{des}', '\psi_{act}', 'Location', 'best');
+grid on;
+
+% End-effector velocity tracking
+figure(2);
+subplot(2,1,1);
+plot(time_vec, dx_ee_desired(1,:), 'b--', 'LineWidth', 2); hold on;
+plot(time_vec, dx_actual(1,:), 'b-', 'LineWidth', 2);
+plot(time_vec, dx_ee_desired(2,:), 'r--', 'LineWidth', 2);
+plot(time_vec, dx_actual(2,:), 'r-', 'LineWidth', 2);
+plot(time_vec, dx_ee_desired(3,:), 'g--', 'LineWidth', 2);
+plot(time_vec, dx_actual(3,:), 'g-', 'LineWidth', 2);
+ylabel('Linear Velocity (m/s)');
+title('End-Effector Linear Velocity Tracking (Joint Space Control)');
+legend('V_x_{des}', 'V_x_{act}', 'V_y_{des}', 'V_y_{act}', 'V_z_{des}', 'V_z_{act}', 'Location', 'best');
+grid on;
+
+subplot(2,1,2);
+plot(time_vec, rad2deg(dx_ee_desired(4,:)), 'b--', 'LineWidth', 2); hold on;
+plot(time_vec, rad2deg(dx_actual(4,:)), 'b-', 'LineWidth', 2);
+plot(time_vec, rad2deg(dx_ee_desired(5,:)), 'r--', 'LineWidth', 2);
+plot(time_vec, rad2deg(dx_actual(5,:)), 'r-', 'LineWidth', 2);
+plot(time_vec, rad2deg(dx_ee_desired(6,:)), 'g--', 'LineWidth', 2);
+plot(time_vec, rad2deg(dx_actual(6,:)), 'g-', 'LineWidth', 2);
+ylabel('Angular Velocity (deg/s)');
+xlabel('Time (s)');
+title('End-Effector Orientation Velocity Tracking (Joint Space Control)');
+legend('d\phi_{des}', 'd\phi_{act}', 'd\theta_{des}', 'd\theta_{act}', 'd\psi_{des}', 'd\psi_{act}', 'Location', 'best');
 grid on;
 
 % Joint position tracking
@@ -265,33 +232,53 @@ for j = 1:7
 end
 sgtitle('Control Torques');
 
-%% Save simulation results
-simulation_results = struct();
-simulation_results.time_vec = time_vec;
-simulation_results.q_reference = q_traj;
-simulation_results.qdot_reference = qdot_traj;
-simulation_results.qddot_reference = qddot_traj;
-simulation_results.q_actual = q_actual;
-simulation_results.qdot_actual = qdot_actual;
-simulation_results.qddot_actual = qddot_actual;
-simulation_results.x_ee_desired = x_ee_desired;     % Desired end-effector trajectory
-simulation_results.x_actual = x_actual;            % Actual end-effector poses
-simulation_results.u_control = u_control;
+% End-effector tracking errors
+figure(7);
+pos_error = x_ee_desired(1:3,:) - x_actual(1:3,:);
+orient_error = x_ee_desired(4:6,:) - x_actual(4:6,:);
 
-save('dynamics_simulation_results.mat', '-struct', 'simulation_results');
-fprintf('\nSimulation results saved to dynamics_simulation_results.mat\n');
+subplot(2,1,1);
+plot(time_vec, 1000*pos_error(1,:), 'b-', 'LineWidth', 1.5); hold on;
+plot(time_vec, 1000*pos_error(2,:), 'r-', 'LineWidth', 1.5);
+plot(time_vec, 1000*pos_error(3,:), 'g-', 'LineWidth', 1.5);
+ylabel('Position Error (mm)');
+title('End-Effector Position Tracking Errors (Joint Space Control)');
+legend('X Error', 'Y Error', 'Z Error', 'Location', 'best');
+grid on;
 
-%% Animation
-% 
-% fprintf('\nStarting animation...\n');
-% figure(7);
-% for i = 1:5:Nsim  % Animate every 5th frame for speed
-%     clf;
-%     show(gen3, q_actual(:,i));
-%     title(sprintf('Robot Motion Animation - Time: %.2f s', time_vec(i)));
-%     drawnow;
-%     pause(0.1);
-% end
+subplot(2,1,2);
+plot(time_vec, rad2deg(orient_error(1,:)), 'b-', 'LineWidth', 1.5); hold on;
+plot(time_vec, rad2deg(orient_error(2,:)), 'r-', 'LineWidth', 1.5);
+plot(time_vec, rad2deg(orient_error(3,:)), 'g-', 'LineWidth', 1.5);
+ylabel('Orientation Error (deg)');
+xlabel('Time (s)');
+title('End-Effector Orientation Tracking Errors (Joint Space Control)');
+legend('\phi Error', '\theta Error', '\psi Error', 'Location', 'best');
+grid on;
+
+% End-effector velocity tracking errors
+figure(8);
+vel_linear_error = dx_ee_desired(1:3,:) - dx_actual(1:3,:);
+vel_angular_error = dx_ee_desired(4:6,:) - dx_actual(4:6,:);
+
+subplot(2,1,1);
+plot(time_vec, 1000*vel_linear_error(1,:), 'b-', 'LineWidth', 1.5); hold on;
+plot(time_vec, 1000*vel_linear_error(2,:), 'r-', 'LineWidth', 1.5);
+plot(time_vec, 1000*vel_linear_error(3,:), 'g-', 'LineWidth', 1.5);
+ylabel('Linear Velocity Error (mm/s)');
+title('End-Effector Linear Velocity Tracking Errors (Joint Space Control)');
+legend('V_x Error', 'V_y Error', 'V_z Error', 'Location', 'best');
+grid on;
+
+subplot(2,1,2);
+plot(time_vec, rad2deg(vel_angular_error(1,:)), 'b-', 'LineWidth', 1.5); hold on;
+plot(time_vec, rad2deg(vel_angular_error(2,:)), 'r-', 'LineWidth', 1.5);
+plot(time_vec, rad2deg(vel_angular_error(3,:)), 'g-', 'LineWidth', 1.5);
+ylabel('Angular Velocity Error (deg/s)');
+xlabel('Time (s)');
+title('End-Effector Angular Velocity Tracking Errors (Joint Space Control)');
+legend('\omega_\phi Error', '\omega_\theta Error', '\omega_\psi Error', 'Location', 'best');
+grid on;
 
 %% Functions
 function qdot = generateRandomQdot(method, varargin)
@@ -385,105 +372,3 @@ function qdot = generateRandomQdot(method, varargin)
     end
     fprintf(']\n\n');
 end
-
-
-% function simulationResults = simulateKG3FreeMotion(robot, q0, qdot0, tspan)
-%     % Simulates free motion dynamics of the KG3 robot (no control torques)
-%     % 
-%     % Inputs:
-%     %   robot - KG3 robot object
-%     %   q0 - Initial joint positions (7x1) [rad]
-%     %   qdot0 - Initial joint velocities (7x1) [rad/s]
-%     %   tspan - Time span [t_start, t_end] or time vector [s]
-%     %
-%     % Outputs:
-%     %   simulationResults - Structure containing time, positions, velocities
-% 
-% 
-%     % Set up time vector
-%     if length(tspan) == 2
-%         t_sim = linspace(tspan(1), tspan(2), 1000);
-%     else
-%         t_sim = tspan;
-%     end
-% 
-%     % Initial state vector [q; qdot]
-%     x0 = [q0(:); qdot0(:)];
-% 
-%     % Define dynamics function
-%     dynamics_func = @(t, x) robotFreeMotionDynamics(t, x, robot);
-% 
-%     % Solve ODE
-%     fprintf('Starting free motion dynamics simulation...\n');
-%     fprintf('Time span: %.2f to %.2f seconds\n', t_sim(1), t_sim(end));
-% 
-%     options = odeset('RelTol', 1e-6, 'AbsTol', 1e-8, 'MaxStep', 0.01);
-%     [t_out, x_out] = ode45(dynamics_func, t_sim, x0, options);
-% 
-%     % Extract results
-%     q_out = x_out(:, 1:7);
-%     qdot_out = x_out(:, 8:14);
-% 
-%     % Package results
-%     simulationResults.time = t_out;
-%     simulationResults.positions = q_out;
-%     simulationResults.velocities = qdot_out;
-%     simulationResults.robot = robot;
-% 
-%     fprintf('Simulation complete!\n');
-% 
-%     % Plot results
-%     plotSimulationResults(simulationResults);
-% end
-% 
-% function xdot = robotFreeMotionDynamics(t, x, robot)
-%     % Robot free motion dynamics function for ODE solver
-%     % Implements: M(q)*qddot + C(q,qdot)*qdot + G(q) = 0 (no applied torques)
-% 
-%     % Extract state
-%     q = x(1:7);
-%     qdot = x(8:14);
-% 
-%     % Update robot state and compute dynamics
-%     robot.q = q;
-%     robot.qdot = qdot;
-%     robot = robot.FKM(q);
-%     robot = robot.computeJacobians();
-%     robot = robot.computeMassMatrix();
-%     robot = robot.computeCoriolisMatrix(qdot);
-%     robot = robot.computeGravityTorque();
-% 
-%     % Forward dynamics with zero applied torques: qddot = M^(-1) * (-C*qdot - G)
-%     qddot = robot.M \ (-robot.C * qdot - robot.G);
-% 
-%     % State derivative
-%     xdot = [qdot; qddot];
-% end
-% 
-% function plotSimulationResults(results)
-%     % Plot free motion simulation results
-% 
-%     figure('Position', [100, 100, 1200, 600]);
-% 
-%     % Plot joint positions
-%     subplot(2, 1, 1);
-%     plot(results.time, results.positions * 180/pi);
-%     title('Joint Positions - Free Motion');
-%     xlabel('Time (s)');
-%     ylabel('Angle (degrees)');
-%     legend({'Joint 1', 'Joint 2', 'Joint 3', 'Joint 4', 'Joint 5', 'Joint 6', 'Joint 7'}, ...
-%            'Location', 'eastoutside');
-%     grid on;
-% 
-%     % Plot joint velocities  
-%     subplot(2, 1, 2);
-%     plot(results.time, results.velocities * 180/pi);
-%     title('Joint Velocities - Free Motion');
-%     xlabel('Time (s)');
-%     ylabel('Velocity (deg/s)');
-%     legend({'Joint 1', 'Joint 2', 'Joint 3', 'Joint 4', 'Joint 5', 'Joint 6', 'Joint 7'}, ...
-%            'Location', 'eastoutside');
-%     grid on;
-% 
-%     sgtitle('KG3 Robot Free Motion Dynamics Simulation');
-% end
