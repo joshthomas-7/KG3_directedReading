@@ -64,7 +64,6 @@ classdef KG3 < handle
             [obj.Ts, obj.mArr, obj.I, obj.r_COM, obj.KD, obj.KP, obj.KD_op, obj.KP_op] = KG3.preCompute();
         end
 
-
         %% Kinematics
         function obj = FKM(obj, q)
             % Computes the forward kinematics of the KG3 for a given joint configuration (q)
@@ -387,45 +386,6 @@ classdef KG3 < handle
             end
         end
 
-        % function T_COM = computeCOMTransform(obj, link_idx)
-        %     % Computes transformation matrix from base frame to COM of link_idx
-        %     % COM is defined in the frame of joint (link_idx-1) per Kinova manual
-        % 
-        %     N = length(obj.q);
-        % 
-        %     if link_idx == 1
-        %         % Base link COM - defined in base frame
-        %         T_COM = [eye(3) obj.r_COM{1}; 0 0 0 1];
-        % 
-        %     elseif link_idx <= N
-        %         % Joint link COM: accumulate transformations up to joint (link_idx-1)
-        %         T_accum = eye(4);
-        %         for j = 1:(link_idx-1)
-        %             R_j = [cos(obj.q(j)) -sin(obj.q(j)) 0 0;
-        %                    sin(obj.q(j))  cos(obj.q(j)) 0 0;
-        %                    0               0            1 0;
-        %                    0               0            0 1];
-        %             A_j = obj.Ts{j} * R_j;
-        %             T_accum = T_accum * A_j;
-        %         end
-        % 
-        %         % Transform COM from joint (link_idx-1) frame to base frame
-        %         r_COM_local = [obj.r_COM{link_idx}; 1];
-        %         r_COM_base = T_accum * r_COM_local;
-        %         T_COM = [T_accum(1:3,1:3) r_COM_base(1:3); 0 0 0 1];
-        % 
-        %     else
-        %         % End-effector (link 8): COM defined in Joint 7's frame
-        %         % So use T_all{7} (base to joint 7) + COM offset
-        %         T_accum = obj.T_all{N};  % Base to Joint 7
-        %         r_COM_local = [obj.r_COM{link_idx}; 1];
-        %         r_COM_base = T_accum * r_COM_local;
-        %         T_COM = [T_accum(1:3,1:3) r_COM_base(1:3); 0 0 0 1];
-        %     end
-        % end
-        % 
-
-
         function T_COM = computeCOMTransform(obj, link_idx)
             % Computes transformation matrix from base frame to COM of link_idx
 
@@ -589,57 +549,6 @@ classdef KG3 < handle
             end
         end
 
-
-        % function obj = computeGravityTorque(obj)
-        %     % Computes gravity torque using geometric Jacobians
-        %     % G_i = -∑_j m_j * J_v_j^T * g
-        %     % where J_v_j is the linear velocity Jacobian for link j's COM
-        % 
-        %     N = length(obj.q);
-        %     L = length(obj.Ts);
-        %     obj.G = zeros(N, 1);
-        % 
-        %     % For each link (skip base link which doesn't move)
-        %     for j = 2:L
-        %         % Get link mass
-        %         m_j = obj.mArr{j};
-        % 
-        %         % Get COM position in base frame
-        %         T_COM = obj.computeCOMTransform(j);
-        %         r_COM = T_COM(1:3, 4);
-        % 
-        %         % Compute Jacobian for this COM
-        %         [J_v, J_w] = obj.computeLinkJacobians(j, r_COM);
-        %         Jcj = [J_v;J_w];
-        % 
-        %         % % Determine which joints affect this link
-        %         % for i = 1:N
-        %         %     % if j <= N
-        %         %     %     affects_link = (i < j); 
-        %         %     % else
-        %         %     %     affects_link = (i <= N); % End-effector affected by all joints
-        %         %     % end
-        %         %     affects_link = i < j;
-        %         % 
-        %         %     if affects_link
-        %         %         % Get joint i axis and origin
-        %         %         [z_i, o_i] = obj.getJointAxisAndOrigin(i);
-        %         % 
-        %         %         % Linear velocity Jacobian column: J_v = z_i × (r_COM - o_i)
-        %         %         J_v(:, i) = cross(z_i, r_COM - o_i);
-        %         %     end
-        %         % end
-        % 
-        %         % Add this link's contribution to gravity torque
-        %         Fcj = m_j*obj.gravity;
-        %         tau_j = [Fcj;zeros(3,1)];
-        % 
-        %         obj.G = obj.G - (Jcj.')*tau_j;
-        %         % obj.G = obj.G - m_j * (J_v' * obj.gravity);
-        %     end
-        % end
-
-
         function affected = linkAffectedByJoint(obj, link_idx, joint_idx)
             % Determines if link_idx is affected by joint_idx motion
             
@@ -708,15 +617,38 @@ classdef KG3 < handle
 
         end
 
+
         function u = inverseDynamicsControl_OPSpace(obj, XD, X, Q)
             % Performs motion control of the KG3 in the operational space
-            % Inputs: 
+            % Inputs:
             % - XD desired end effector trajectory [x, xdot, xddot]
             % - X true end effector trajectory [x, xdot, xddot]
             % - Q true joint space trajectory [q, qdot, qddot]
 
+            % Initialize persistent variables for exponential filter
+            persistent u_filtered_prev
+            persistent first_call
+
+            if isempty(first_call)
+                first_call = false;
+                u_filtered_prev = zeros(7, 1);
+            end
+
             KD = obj.KD_op;
             KP = obj.KP_op;
+            q = Q(:,1);
+
+            % Singularity detection and filter parameter adjustment
+            joint6_angle = abs(q(6));
+            singularity_threshold = deg2rad(5);  % Start filtering when |q6| < 5°
+
+            % Calculate filter strength based on proximity to singularity
+            if joint6_angle < singularity_threshold
+                filter_alpha = 0.8;
+                fprintf("Near joint 6 singularity \n");
+            else
+                filter_alpha = 1.0;  % No filtering when far from singularity
+            end
 
             % Update the dynamics based on the joint configuration
             qdot = Q(:,2);
@@ -736,12 +668,68 @@ classdef KG3 < handle
             xtilde = XD(:,1) - X(:,1);
             xtilde_dot = XD(:,2) - X(:,2);
             xd_ddot = XD(:,3);
-            y = pinv(JA)*(xd_ddot + KD*xtilde_dot + KP*xtilde - JA_dot*qdot);
+            y = pinv(JA)* (xd_ddot + KD*xtilde_dot + KP*xtilde - JA_dot*qdot);
 
             % Applying the control law
             n = obj.C*qdot + obj.G;
-            u = obj.M*y + n;
+            u_raw = obj.M*y + n;
+
+            % Apply exponential filter
+            if first_call
+                % For the first call, initialize with raw torque
+                u_filtered = u_raw;
+                first_call = true;
+            else
+                % Exponential filter: u_filtered = α * u_raw + (1-α) * u_filtered_prev
+                u_filtered = filter_alpha * u_raw + (1 - filter_alpha) * u_filtered_prev;
+            end
+
+            % Store filtered torque for next iteration
+            u_filtered_prev = u_filtered;
+            u = u_filtered;
+
         end
+
+        % function u = inverseDynamicsControl_OPSpace(obj, XD, X, Q)
+        %     % Performs motion control of the KG3 in the operational space
+        %     % Inputs: 
+        %     % - XD desired end effector trajectory [x, xdot, xddot]
+        %     % - X true end effector trajectory [x, xdot, xddot]
+        %     % - Q true joint space trajectory [q, qdot, qddot]
+        % 
+        %     KD = obj.KD_op;
+        %     KP = obj.KP_op;
+        % 
+        % 
+        %     q = Q(:,1);
+        %     if abs(q(6)) < deg2rad(5)
+        %         disp(1)
+        %     end
+        % 
+        %     % Update the dynamics based on the joint configuration
+        %     qdot = Q(:,2);
+        %     obj = obj.FKM(Q(:,1));
+        %     obj = obj.computeJacobians();
+        %     obj = obj.computeMassMatrix();
+        %     obj = obj.computeCoriolisMatrix(qdot);
+        %     obj = obj.computeGravityTorque();
+        %     obj = obj.computeAnalyticalJacobian();
+        %     obj = obj.computeAnalyticalHessian();
+        %     obj = obj.computeAnalyticalJacobianDot(qdot);
+        % 
+        %     JA = obj.JA;
+        %     JA_dot = obj.JA_dot;
+        % 
+        %     % Computing the required qddot
+        %     xtilde = XD(:,1) - X(:,1);
+        %     xtilde_dot = XD(:,2) - X(:,2);
+        %     xd_ddot = XD(:,3);
+        %     y = pinv(JA)*(xd_ddot + KD*xtilde_dot + KP*xtilde - JA_dot*qdot);
+        % 
+        %     % Applying the control law
+        %     n = obj.C*qdot + obj.G;
+        %     u = obj.M*y + n;
+        % end
 
         function S = skew(v)
             % Creates skew-symmetric matrix from 3D vector
@@ -963,8 +951,9 @@ classdef KG3 < handle
             % KP = 8*eye(7,7);
             % L = [8,8,8,8,8,8,8];
             L = (4/0.4)*ones(1,7);
+            zeta = 1;
             KP = diag(L.^2);
-            KD = diag(2*L);
+            KD = diag(2*zeta*L);
             % KD = 2*8*eye(7,7);
             
             L_op = (4/0.4)*ones(1,6);
@@ -974,78 +963,6 @@ classdef KG3 < handle
 
 
         end
-
-
-        % function [Ts, mArr, I, rC] = preCompute()
-        %     % Creating the coordinate transformations
-        %      Ts = {};
-        %      T01 = [1 0 0 0;
-        %      0 -1 0 0;
-        %      0 0 -1 0.1564;
-        %      0 0 0 1];
-        %      Ts{1} = T01;
-        %      T12 = [1 0 0 0;
-        %      0 0 -1 0.0054;
-        %      0 1 0 -0.1284;
-        %      0 0 0 1];
-        %      Ts{2} = T12;
-        %      T23 = [1 0 0 0;
-        %      0 0 1 -0.2104;
-        %      0 -1 0 -0.00640;
-        %      0 0 0 1];
-        %      Ts{3} = T23;
-        %      T34 = [1 0 0 0;
-        %      0 0 -1 0.0064;
-        %      0 1 0 -0.2104;
-        %      0 0 0 1];
-        %      Ts{4} = T34;
-        %      T45 = [1 0 0 0;
-        %      0 0 1 -0.2084;
-        %      0 -1 0 -0.0064;
-        %      0 0 0 1];
-        %      Ts{5} = T45;
-        %      T56 = [1 0 0 0;
-        %      0 0 -1 0;
-        %      0 1 0 -0.1059;
-        %      0 0 0 1];
-        %      Ts{6} = T56;
-        %      T67 = [1 0 0 0;
-        %      0 0 1 -0.1059;
-        %      0 -1 0 0;
-        %      0 0 0 1];
-        %      Ts{7} = T67;
-        %      T78 = [1 0 0 0;
-        %      0 -1 0 0;
-        %      0 0 -1 -0.0615;
-        %      0 0 0 1];
-        %      Ts{8} = T78;
-        % 
-        %     % Load toolbox robot
-        %     gen3 = loadrobot("kinovaGen3", "DataFormat", "column", "Version", 2);
-        % 
-        %     % Extract ALL parameters from toolbox for consistency
-        %     mArr = {1.667}; % Base mass only from manual
-        %     I = {[0.004622 0.000009 0.000060;
-        %           0.000009 0.004495 0.000009; 
-        %           0.000060 0.000009 0.002079]}; % Base inertia from manual
-        %     rC = {[-0.000648; -0.000166; 0.084487]}; % Base COM from manual
-        % 
-        %     for i = 1:length(gen3.Bodies)
-        %         % Extract mass
-        %         mArr{end+1} = gen3.Bodies{i}.Mass;
-        % 
-        %         % Extract and convert inertia
-        %         I_vec = gen3.Bodies{i}.Inertia;
-        %         I_matrix = [I_vec(1) I_vec(6) I_vec(5);
-        %                    I_vec(6) I_vec(2) I_vec(4);
-        %                    I_vec(5) I_vec(4) I_vec(3)];
-        %         I{end+1} = I_matrix;
-        % 
-        %         % Extract COM (in joint frame)
-        %         rC{end+1} = gen3.Bodies{i}.CenterOfMass.';
-        %     end
-        % end
-        % 
 
     end
 end
